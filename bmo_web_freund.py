@@ -1160,7 +1160,6 @@ def history_clear():
 # ── ADMIN ROUTES ──────────────────────────────────────────────────
 
 @app.route('/api/admin/toggle', methods=['POST'])
-@login_required
 def admin_toggle():
     """Freund aktiviert/deaktiviert Admin-Zugriff selbst."""
     global _admin_access, _jumpscare_pending
