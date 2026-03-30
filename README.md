@@ -33,52 +33,31 @@ Das Denken (KI, Stimme) läuft auf dem PC deines Freundes. Spotify, Shutdown und
 
 ### Schritt 2 · Repo klonen
 
+**CMD im richtigen Ordner öffnen:**
+1. Navigiere im Explorer zu dem Ordner, wo BMO installiert werden soll
+2. Klicke in die **Adressleiste** des Explorer-Fensters → tippe `cmd` → Enter
+3. Im CMD-Fenster:
+
 ```bash
 git clone https://github.com/HolziDape/Bmo_f.git
 cd Bmo_f
 ```
 
-Oder als ZIP herunterladen: **Code → Download ZIP**
+Alternativ als ZIP: **Code → Download ZIP** → entpacken.
 
-### Schritt 3 · Abhängigkeiten installieren
-
-Einfach `SETUP_EINMALIG.bat` doppelklicken — das installiert alles automatisch.
-
-Oder manuell:
-```bash
-pip install flask flask-cors requests psutil spotipy pillow
-```
-
-> 💡 `spotipy` und `pillow` sind optional — ohne Spotify-Steuerung und Bildschirm-Streaming läuft alles andere trotzdem.
-
-### Schritt 4 · config.txt ausfüllen
-
-Öffne `config.txt` und trage die Tailscale-IP deines Freundes ein:
-
-```
-CORE_IP   = 100.x.x.x    ← Tailscale-IP deines Freundes (er findet sie mit: tailscale ip -4)
-CORE_PORT = 6000
-```
-
-**Spotify** *(optional — nur wenn du Spotify-Steuerung willst)*:
-```
-SPOTIFY_CLIENT_ID     = HIER_CLIENT_ID_EINTRAGEN
-SPOTIFY_CLIENT_SECRET = HIER_CLIENT_SECRET_EINTRAGEN
-SPOTIFY_REDIRECT_URI  = http://127.0.0.1:8888/callback
-SPOTIFY_PLAYLIST_ID   = HIER_PLAYLIST_ID_EINTRAGEN
-```
-
-> Spotify-App anlegen: [developer.spotify.com](https://developer.spotify.com/dashboard) → App erstellen → Redirect URI `http://127.0.0.1:8888/callback` eintragen → Client ID + Secret kopieren.
-
-### Schritt 5 · Starten
+### Schritt 3 · Starten
 
 ```
 START_WEB.bat  ← Doppelklick
 ```
 
-Beim **ersten Start** öffnet sich automatisch `http://localhost:5000/setup` — dort ein Passwort wählen, fertig.
+Beim **ersten Start** installiert es alle Pakete automatisch und öffnet `http://localhost:5000/setup` im Browser.
+Dort die **Tailscale-IP deines Freundes** und ein **Passwort** eingeben — fertig.
 
 Ab dann öffnet sich der Browser direkt mit dem Login.
+
+> 💡 **Spotify** *(optional)*: In `config.txt` die Spotify-Daten eintragen.
+> Anleitung: [developer.spotify.com](https://developer.spotify.com/dashboard) → App erstellen → Redirect URI `http://127.0.0.1:8888/callback` → Client ID + Secret kopieren.
 
 ---
 

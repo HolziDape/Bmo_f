@@ -4,10 +4,9 @@ BMO Web Interface - Freund-Version
 Starten: Doppelklick auf START_WEB.bat
 
 Was du brauchst:
-  1. config.txt ausfüllen (IP + Spotify-Daten)
-  2. Einmalig SETUP_EINMALIG.bat ausführen
-  3. Dann START_WEB.bat starten
-  4. Browser öffnet sich automatisch auf http://localhost:5000
+  1. START_WEB.bat starten (installiert beim ersten Mal alles automatisch)
+  2. Browser öffnet sich auf http://localhost:5000/setup
+  3. Tailscale-IP deines Freundes + Passwort eingeben — fertig
 
 Wie es funktioniert:
   - Das Denken (KI, Stimme) läuft auf dem PC deines Freundes
@@ -56,32 +55,39 @@ CORS(app)
 
 PORT = 5000
 
-# ── PASSWORT ────────────────────────────────────────────────────────
+# ── KONFIGURATION ────────────────────────────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
 
-def _load_password():
+def _load_config():
+    cfg = {}
     if os.path.exists(_CONFIG_PATH):
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("WEB_PASSWORD="):
-                    pw = line.split("=", 1)[1].strip()
-                    if pw:
-                        return pw
-    return None
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+    return cfg
 
-def _save_password(pw: str):
+def _save_config(data: dict):
     with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        f.write(f"WEB_PASSWORD={pw}\n")
-    log.info("Passwort in bmo_config.txt gespeichert.")
+        for k, v in data.items():
+            f.write(f"{k}={v}\n")
 
-WEB_PASSWORD   = _load_password()
+_cfg         = _load_config()
+WEB_PASSWORD = _cfg.get("WEB_PASSWORD", "").strip() or None
+_core_ip     = _cfg.get("CORE_IP", "").strip()
+CORE_URL     = f"http://{_core_ip}:6000" if _core_ip else None
 app.secret_key = (WEB_PASSWORD or "bmo-setup-mode") + "-bmo-secret-42"
+if CORE_URL:
+    log.info(f"Core: {CORE_URL}")
+else:
+    log.warning("CORE_IP nicht konfiguriert — bitte /setup aufrufen")
 
 def login_required(f):
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        if not WEB_PASSWORD:
+        if not WEB_PASSWORD or not CORE_URL:
             return redirect(url_for('setup'))
         if not session.get('authenticated'):
             if request.path.startswith('/api/'):
@@ -92,13 +98,12 @@ def login_required(f):
 
 
 # ══════════════════════════════════════════════════════════════════
-# CONFIG LESEN
+# CONFIG LESEN (Spotify — optional, aus config.txt)
 # ══════════════════════════════════════════════════════════════════
 
 def read_config():
     config_path = os.path.join(BASE_DIR, "config.txt")
     if not os.path.exists(config_path):
-        log.error("config.txt nicht gefunden!")
         return {}
     cfg = {}
     with open(config_path, "r", encoding="utf-8") as f:
@@ -111,21 +116,6 @@ def read_config():
     return cfg
 
 cfg = read_config()
-
-# Core-Verbindung
-core_ip   = cfg.get("CORE_IP", "")
-core_port = int(cfg.get("CORE_PORT", "6000"))
-
-if not core_ip or core_ip == "HIER_IP_EINTRAGEN":
-    print("\n" + "="*50)
-    print("  FEHLER: Bitte erst config.txt ausfüllen!")
-    print("  Öffne config.txt und trage die IP ein.")
-    print("="*50 + "\n")
-    input("Drücke ENTER zum Beenden...")
-    sys.exit(1)
-
-CORE_URL = f"http://{core_ip}:{core_port}"
-log.info(f"Core: {CORE_URL}")
 
 # Spotify
 SPOTIFY_CLIENT_ID     = cfg.get("SPOTIFY_CLIENT_ID", "")
@@ -366,9 +356,9 @@ SETUP_HTML = """<!DOCTYPE html>
   .input-wrap { position:relative; margin-bottom:12px; }
   .input-wrap .icon { position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:17px; pointer-events:none; }
   .lbl { font-size:12px; color:var(--text2); margin-bottom:6px; font-weight:500; }
-  input[type=password] { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:13px 16px 13px 42px; color:var(--text); font-size:16px; outline:none; transition:border-color .2s; }
-  input[type=password]:focus { border-color:var(--green); }
-  input[type=password]::placeholder { color:#555; }
+  input[type=password], input[type=text] { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:13px 16px 13px 42px; color:var(--text); font-size:16px; outline:none; transition:border-color .2s; }
+  input[type=password]:focus, input[type=text]:focus { border-color:var(--green); }
+  input[type=password]::placeholder, input[type=text]::placeholder { color:#555; }
   button[type=submit] { width:100%; background:var(--green); border:none; border-radius:14px; padding:14px; color:#fff; font-size:16px; font-weight:700; cursor:pointer; transition:background .15s,transform .1s; margin-top:4px; }
   button[type=submit]:hover { background:var(--green-dark); }
   button[type=submit]:active { transform:scale(.97); }
@@ -406,13 +396,18 @@ SETUP_HTML = """<!DOCTYPE html>
   <div class="card">
     <div class="badge">✨ Ersteinrichtung</div>
     <div class="card-title">Willkommen bei BMO!</div>
-    <div class="card-sub">Wähle ein Passwort für das Web-Interface.<br>Du brauchst es beim nächsten Login.</div>
+    <div class="card-sub">Trage die Tailscale-IP deines Freundes ein und wähle ein Passwort.</div>
     {% if error %}<div class="err">⚠️ {{ error }}</div>{% endif %}
     <form method="post">
+      <div class="lbl">Tailscale-IP deines Freundes</div>
+      <div class="input-wrap">
+        <span class="icon">🌐</span>
+        <input type="text" name="core_ip" placeholder="100.x.x.x" autocomplete="off" autofocus>
+      </div>
       <div class="lbl">Neues Passwort</div>
       <div class="input-wrap">
         <span class="icon">🔑</span>
-        <input type="password" name="password" placeholder="Passwort wählen..." autofocus autocomplete="new-password">
+        <input type="password" name="password" placeholder="Passwort wählen..." autocomplete="new-password">
       </div>
       <div class="lbl">Passwort wiederholen</div>
       <div class="input-wrap">
@@ -1022,17 +1017,7 @@ def _chat_and_act(message):
     if local_result:
         response_text = local_result
 
-    audio_b64 = None
-    if response_text:
-        try:
-            rs = req.post(f"{CORE_URL}/speak",
-                          json={"text": response_text},
-                          timeout=120)
-            audio_b64 = rs.json().get("audio")
-        except:
-            pass
-
-    return response_text, audio_b64
+    return response_text, None
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1054,23 +1039,30 @@ def logout():
 
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
-    global WEB_PASSWORD
-    if WEB_PASSWORD:
+    global WEB_PASSWORD, CORE_URL
+    if WEB_PASSWORD and CORE_URL:
         return redirect(url_for('login'))
     error = None
     if request.method == 'POST':
-        pw  = request.form.get('password', '').strip()
-        pw2 = request.form.get('password2', '').strip()
-        if not pw:
+        pw      = request.form.get('password', '').strip()
+        pw2     = request.form.get('password2', '').strip()
+        core_ip = request.form.get('core_ip', '').strip()
+        if not core_ip:
+            error = 'Tailscale-IP darf nicht leer sein.'
+        elif not pw:
             error = 'Passwort darf nicht leer sein.'
         elif pw != pw2:
             error = 'Passwörter stimmen nicht überein.'
         else:
-            _save_password(pw)
+            cfg = _load_config()
+            cfg['WEB_PASSWORD'] = pw
+            cfg['CORE_IP']      = core_ip
+            _save_config(cfg)
             WEB_PASSWORD   = pw
+            CORE_URL       = f"http://{core_ip}:6000"
             app.secret_key = pw + "-bmo-secret-42"
             session['authenticated'] = True
-            log.info("Ersteinrichtung abgeschlossen.")
+            log.info(f"Ersteinrichtung abgeschlossen. Core: {CORE_URL}")
             return redirect(url_for('index'))
     return render_template_string(SETUP_HTML, error=error)
 
@@ -1122,15 +1114,7 @@ def voice_endpoint():
         local_result  = handle_local_action(action, action_params)
         if local_result:
             response_text = local_result
-        audio_b64 = None
-        if response_text:
-            try:
-                rs = req.post(f"{CORE_URL}/speak",
-                              json={"text": response_text}, timeout=120)
-                audio_b64 = rs.json().get("audio")
-            except:
-                pass
-        return jsonify(transcript=transcript, response=response_text, audio=audio_b64)
+        return jsonify(transcript=transcript, response=response_text, audio=None)
     except Exception as e:
         return jsonify(transcript='', response=f"Fehler: {e}", audio=None)
 
@@ -1210,23 +1194,24 @@ def admin_screen():
 
 if __name__ == '__main__':
     log.info(f"BMO Web (Freund-Version) startet auf Port {PORT}...")
-    log.info(f"Core: {CORE_URL}")
+    log.info(f"Core: {CORE_URL or 'nicht konfiguriert'}")
     log.info(f"Spotify konfiguriert: {SPOTIFY_OK}")
     log.info(f"Screen-Streaming: {'OK' if _SCREEN_OK else 'Pillow fehlt'}")
 
-    try:
-        r = req.get(f"{CORE_URL}/ping", timeout=3)
-        if r.status_code == 200:
-            log.info("Core erreichbar!")
-        else:
-            log.warning("Core antwortet, aber Status nicht OK.")
-    except:
-        log.warning(f"Core NICHT erreichbar auf {CORE_URL}")
-        log.warning("Prüfe ob dein Freund bmo_core.py gestartet hat.")
+    if CORE_URL:
+        try:
+            r = req.get(f"{CORE_URL}/ping", timeout=3)
+            if r.status_code == 200:
+                log.info("Core erreichbar!")
+            else:
+                log.warning("Core antwortet, aber Status nicht OK.")
+        except:
+            log.warning(f"Core NICHT erreichbar auf {CORE_URL}")
+            log.warning("Prüfe ob dein Freund bmo_core.py gestartet hat.")
 
     def open_browser():
         time.sleep(1.2)
-        if not WEB_PASSWORD:
+        if not WEB_PASSWORD or not CORE_URL:
             webbrowser.open(f"http://localhost:{PORT}/setup")
         else:
             webbrowser.open(f"http://localhost:{PORT}")
