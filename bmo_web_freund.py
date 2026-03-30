@@ -282,6 +282,35 @@ def handle_local_action(action, action_params):
             subprocess.run(["shutdown", "/s", "/t", "0"])
         ), daemon=True).start()
         return "Tschüss! Ich fahre jetzt herunter."
+    elif action == "set_timer":
+        minutes = float(action_params.get("minutes", 5))
+        label   = action_params.get("label", "")
+        def _timer_alert():
+            time.sleep(minutes * 60)
+            log.info(f"TIMER ABGELAUFEN: {label or 'Timer'}")
+            subprocess.Popen(["msg", "*", f"BMO Timer: {label or 'Zeit ist um!'} ({int(minutes)} Min)"])
+        threading.Thread(target=_timer_alert, daemon=True).start()
+        lbl = f" ({label})" if label else ""
+        return f"Timer{lbl} für {int(minutes)} Minuten gesetzt!"
+    elif action == "open_app":
+        name = action_params.get("name", "").lower()
+        apps = {"chrome": "chrome", "discord": "discord", "calculator": "calc",
+                "explorer": "explorer", "notepad": "notepad", "spotify": "spotify"}
+        exe = apps.get(name, name)
+        try:
+            subprocess.Popen([exe])
+            return f"{name.capitalize()} wird geöffnet!"
+        except:
+            return f"Konnte {name} nicht öffnen."
+    elif action == "take_screenshot":
+        try:
+            from PIL import ImageGrab
+            img  = ImageGrab.grab()
+            path = os.path.join(BASE_DIR, "screenshot.png")
+            img.save(path)
+            return f"Screenshot gespeichert!"
+        except:
+            return "Screenshot fehlgeschlagen."
     elif action == "spotify_play":
         return local_spotify_play(action_params.get("query", ""))
     elif action == "spotify_pause":
@@ -1011,7 +1040,7 @@ def _chat_and_act(message):
 
     response_text = d.get("response", "")
     action        = d.get("action")
-    action_params = d.get("action_params", {})
+    action_params = d.get("action_params") or {}
 
     local_result = handle_local_action(action, action_params)
     if local_result:
