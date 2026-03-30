@@ -676,6 +676,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
     </button>
+    <button class="qbtn" onclick="showCommands()" style="border-color:#6366f1;color:#818cf8;">
+      <span class="icon">📋</span>Befehle
+    </button>
   </div>
 
   <div class="chat" id="chat">
@@ -774,6 +777,16 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- COMMANDS OVERLAY -->
+<div class="overlay" id="commandsOverlay" onclick="closeOverlay('commandsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()" style="max-height:80vh;overflow-y:auto;">
+    <div class="sheet-handle"></div>
+    <h2>📋 Befehle</h2>
+    <div id="commandsList" style="margin-top:8px;"></div>
+    <button onclick="closeOverlay('commandsOverlay')" style="width:100%;padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;cursor:pointer;margin-top:14px;">Schließen</button>
+  </div>
+</div>
+
 <!-- JUMPSCARE OVERLAY -->
 <div id="jumpscareOverlay">
   <div class="js-content">👻</div>
@@ -843,6 +856,33 @@ async function spPlaylist() { try { const r = await fetch('/api/spotify/playlist
 async function spPause()    { quickAction('pause'); }
 async function spResume()   { quickAction('weiter'); }
 async function spSkip()     { quickAction('nächstes Lied'); }
+
+// ── BEFEHLE ──────────────────────────────────────────────────────
+async function showCommands() {
+  document.getElementById('commandsOverlay').classList.add('show');
+  const list = document.getElementById('commandsList');
+  try {
+    const r = await fetch('/api/commands');
+    const d = await r.json();
+    list.innerHTML = '';
+    d.commands.forEach(cat => {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-bottom:16px;';
+      sec.innerHTML = `<div style="font-size:13px;color:var(--text2);margin-bottom:8px;font-weight:600;">${cat.icon} ${cat.category}</div>`;
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+      cat.items.forEach(item => {
+        const b = document.createElement('button');
+        b.textContent = item.label;
+        b.style.cssText = 'background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:7px 12px;color:var(--text);font-size:13px;cursor:pointer;';
+        b.onclick = () => { closeOverlay('commandsOverlay'); quickAction(item.msg); };
+        grid.appendChild(b);
+      });
+      sec.appendChild(grid);
+      list.appendChild(sec);
+    });
+  } catch(e) { list.innerHTML = '<p style="color:var(--text2)">Fehler beim Laden.</p>'; }
+}
 
 // ── ADMIN TOGGLE ─────────────────────────────────────────────────
 let _adminEnabled = false;
@@ -1025,6 +1065,41 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 """
 
 
+COMMANDS = [
+    {"category": "Zeit & Info", "icon": "ℹ️", "items": [
+        {"label": "Uhrzeit",        "msg": "Wie spät ist es?"},
+        {"label": "System Status",  "msg": "System Status"},
+        {"label": "Wetter",         "msg": "Wie ist das Wetter?"},
+        {"label": "News",           "msg": "Was gibt es Neues?"},
+        {"label": "Witz",           "msg": "Erzähl mir einen Witz"},
+    ]},
+    {"category": "Musik", "icon": "🎵", "items": [
+        {"label": "Playlist",       "msg": "Spiel meine Playlist"},
+        {"label": "Pause",          "msg": "Pause"},
+        {"label": "Weiter",         "msg": "weiter"},
+        {"label": "Skip",           "msg": "nächstes Lied"},
+        {"label": "Lauter",         "msg": "lauter"},
+        {"label": "Leiser",         "msg": "leiser"},
+        {"label": "Lautstärke 50%", "msg": "Lautstärke 50"},
+        {"label": "Lautstärke 80%", "msg": "Lautstärke 80"},
+    ]},
+    {"category": "Apps öffnen", "icon": "🖥️", "items": [
+        {"label": "Chrome",         "msg": "Öffne Chrome"},
+        {"label": "Spotify",        "msg": "Öffne Spotify"},
+        {"label": "Discord",        "msg": "Öffne Discord"},
+        {"label": "Explorer",       "msg": "Öffne Explorer"},
+        {"label": "Notepad",        "msg": "Öffne Notepad"},
+        {"label": "Rechner",        "msg": "Öffne Rechner"},
+    ]},
+    {"category": "System", "icon": "⚙️", "items": [
+        {"label": "Screenshot",     "msg": "Mach einen Screenshot"},
+        {"label": "Timer 5min",     "msg": "Timer 5 Minuten"},
+        {"label": "Timer 10min",    "msg": "Timer 10 Minuten"},
+        {"label": "Timer 25min",    "msg": "Timer 25 Minuten"},
+        {"label": "PC ausschalten", "msg": "schalte den PC aus"},
+    ]},
+]
+
 # ══════════════════════════════════════════════════════════════════
 # ROUTES
 # ══════════════════════════════════════════════════════════════════
@@ -1111,6 +1186,11 @@ def status():
         ram = psutil.virtual_memory().percent
         t   = datetime.datetime.now().strftime('%H:%M')
         return jsonify(cpu=cpu, ram=ram, time=t, gpu=None)
+
+@app.route('/api/commands')
+@login_required
+def commands_list():
+    return jsonify(commands=COMMANDS)
 
 @app.route('/api/chat', methods=['POST'])
 @login_required
