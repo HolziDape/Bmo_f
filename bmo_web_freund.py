@@ -789,7 +789,7 @@ HTML = """<!DOCTYPE html>
 
 <!-- JUMPSCARE OVERLAY -->
 <div id="jumpscareOverlay">
-  <div class="js-content">👻</div>
+  <img id="jsImg" src="/static/ui/bmo_alert.png" style="width:100%;height:100%;object-fit:cover;display:block;">
 </div>
 
 <script>
@@ -934,21 +934,12 @@ setInterval(pollAdminEvents, 2000);
 function triggerJumpscareLocal() {
   const el = document.getElementById('jumpscareOverlay');
   el.classList.add('show');
-  // Ton versuchen
   try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(80, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.4);
-    gain.gain.setValueAtTime(0.8, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
-    osc.start(); osc.stop(ctx.currentTime + 1.2);
+    const snd = new Audio('/static/ui/bmo_alert.mp3');
+    snd.volume = 1.0;
+    snd.play();
   } catch(e) {}
-  // Nach 2.5s wieder schließen
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), 3000);
 }
 // Jumpscare auch durch Klick schließen
 document.getElementById('jumpscareOverlay').addEventListener('click', () => {
