@@ -140,6 +140,46 @@ _admin_access     = False   # Freund hat Admin-Zugriff aktiviert
 _jumpscare_pending = False  # Admin hat Jumpscare ausgelöst
 _admin_lock       = threading.Lock()
 
+JUMPSCARE_IMAGE = os.path.join(BASE_DIR, "static", "ui", "bmo_alert.png")
+JUMPSCARE_SOUND = os.path.join(BASE_DIR, "static", "ui", "bmo_alert.mp3")
+
+def do_jumpscare():
+    """Öffnet Vollbild-Jumpscare auf dem Desktop (über alle Programme)."""
+    def run():
+        try:
+            import tkinter as tk
+            from PIL import Image, ImageTk
+            root = tk.Tk()
+            root.attributes('-fullscreen', True)
+            root.attributes('-topmost', True)
+            root.configure(bg='black')
+            root.overrideredirect(True)
+            if os.path.exists(JUMPSCARE_IMAGE):
+                img = Image.open(JUMPSCARE_IMAGE)
+                sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+                img = img.resize((sw, sh), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                lbl = tk.Label(root, image=photo, bg='black')
+                lbl.pack(fill='both', expand=True)
+            else:
+                tk.Label(root, text='👻', font=('Arial', 200), bg='black', fg='white').pack(expand=True)
+            if os.path.exists(JUMPSCARE_SOUND):
+                try:
+                    import pygame
+                    pygame.mixer.init()
+                    pygame.mixer.music.load(JUMPSCARE_SOUND)
+                    pygame.mixer.music.set_volume(1.0)
+                    pygame.mixer.music.play()
+                except Exception as e:
+                    log.warning(f"Jumpscare Sound Fehler: {e}")
+            root.bind('<Button-1>', lambda e: root.destroy())
+            root.bind('<Key>', lambda e: root.destroy())
+            root.after(4000, root.destroy)
+            root.mainloop()
+        except Exception as e:
+            log.error(f"Jumpscare Fehler: {e}")
+    threading.Thread(target=run, daemon=True).start()
+
 
 # ══════════════════════════════════════════════════════════════════
 # LOKALES SPOTIFY
@@ -1273,6 +1313,7 @@ def admin_jumpscare():
             return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
         _jumpscare_pending = True
     log.info("Jumpscare ausgelöst vom Admin.")
+    threading.Thread(target=do_jumpscare, daemon=True).start()
     return jsonify(ok=True)
 
 @app.route('/api/admin/screen')
