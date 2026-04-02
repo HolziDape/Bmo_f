@@ -45,10 +45,18 @@ import datetime
 import functools
 
 try:
-    from PIL import ImageGrab
-    _SCREEN_OK = True
+    import mss as _mss_lib
+    from PIL import Image as _PilImage
+    _SCREEN_OK      = True
+    _SCREEN_BACKEND = 'mss'
 except ImportError:
-    _SCREEN_OK = False
+    try:
+        from PIL import ImageGrab, Image as _PilImage
+        _SCREEN_OK      = True
+        _SCREEN_BACKEND = 'pil'
+    except ImportError:
+        _SCREEN_OK      = False
+        _SCREEN_BACKEND = None
 
 app  = Flask(__name__)
 CORS(app)
@@ -370,29 +378,74 @@ def handle_local_action(action, action_params):
 # SCREEN STREAMING
 # ══════════════════════════════════════════════════════════════════
 
-_screen_lock = threading.Lock()
+_latest_frame:   bytes | None = None
+_frame_lock      = threading.Lock()
+_capture_active  = False
+_screen_viewers  = 0
+_viewers_lock    = threading.Lock()
+_selected_monitor = 1
+_monitor_lock    = threading.Lock()
 
-def _screen_generator():
-    """MJPEG-Generator: streamt den Desktop als ca. 10 FPS JPEG-Stream."""
+def _capture_daemon():
+    global _latest_frame, _capture_active
+    target_interval = 1.0 / 15
+    sct = _mss_lib.mss() if _SCREEN_BACKEND == 'mss' else None
     while True:
-        if not _SCREEN_OK:
-            break
+        with _viewers_lock:
+            if _screen_viewers == 0:
+                _capture_active = False
+                break
+        t0 = time.monotonic()
         try:
-            with _screen_lock:
+            if _SCREEN_BACKEND == 'mss':
+                with _monitor_lock:
+                    mon_idx = _selected_monitor
+                monitors = sct.monitors
+                mon = monitors[mon_idx] if mon_idx < len(monitors) else monitors[1]
+                raw = sct.grab(mon)
+                img = _PilImage.frombytes('RGB', raw.size, raw.bgra, 'raw', 'BGRX')
+            else:
                 img = ImageGrab.grab()
             w, h = img.size
-            if w > 1280:
-                h = int(h * 1280 / w)
-                w = 1280
-                img = img.resize((w, h))
+            nw = min(w, 1920)
+            nh = int(h * nw / w)
+            if (nw, nh) != (w, h):
+                img = img.resize((nw, nh), _PilImage.BILINEAR)
             buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=60)
-            frame = buf.getvalue()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            img.save(buf, format='JPEG', quality=82, optimize=False)
+            with _frame_lock:
+                _latest_frame = buf.getvalue()
         except Exception:
             pass
-        time.sleep(0.1)
+        elapsed = time.monotonic() - t0
+        wait = target_interval - elapsed
+        if wait > 0:
+            time.sleep(wait)
+    if sct:
+        sct.close()
+
+def _ensure_capture_running():
+    global _capture_active
+    with _viewers_lock:
+        if not _capture_active and _SCREEN_OK:
+            _capture_active = True
+            threading.Thread(target=_capture_daemon, daemon=True).start()
+
+def _screen_generator():
+    global _screen_viewers
+    with _viewers_lock:
+        _screen_viewers += 1
+    _ensure_capture_running()
+    try:
+        while True:
+            with _frame_lock:
+                frame = _latest_frame
+            if frame:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.067)
+    finally:
+        with _viewers_lock:
+            _screen_viewers = max(0, _screen_viewers - 1)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1327,6 +1380,40 @@ def admin_screen():
         return jsonify(error="Pillow nicht installiert."), 503
     return Response(_screen_generator(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/admin/screen/monitors')
+def admin_screen_monitors():
+    """Gibt verfügbare Monitore zurück."""
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(error="Zugriff nicht erlaubt."), 403
+    if not _SCREEN_OK or _SCREEN_BACKEND != 'mss':
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}], active=1)
+    try:
+        with _mss_lib.mss() as sct:
+            result = [
+                {'idx': i, 'label': f'Monitor {i}  ({m["width"]}×{m["height"]})'}
+                for i, m in enumerate(sct.monitors) if i > 0
+            ]
+        with _monitor_lock:
+            active = _selected_monitor
+        return jsonify(monitors=result, active=active)
+    except Exception as e:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1'}], active=1)
+
+@app.route('/api/admin/screen/monitor', methods=['POST'])
+def admin_screen_set_monitor():
+    """Setzt aktiven Monitor."""
+    global _selected_monitor
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(error="Zugriff nicht erlaubt."), 403
+    idx = request.get_json(force=True).get('idx', 1)
+    with _monitor_lock:
+        _selected_monitor = int(idx)
+    return jsonify(ok=True, active=_selected_monitor)
 
 
 # ══════════════════════════════════════════════════════════════════
