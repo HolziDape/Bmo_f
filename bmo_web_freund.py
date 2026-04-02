@@ -1357,6 +1357,13 @@ def admin_poll():
         _jumpscare_pending = False  # einmal lesen = konsumieren
     return jsonify(jumpscare=js)
 
+@app.route('/api/admin/info')
+def admin_info():
+    """Öffentliche Info: Web online + Admin-Zugriff aktiv?"""
+    with _admin_lock:
+        enabled = _admin_access
+    return jsonify(online=True, admin_access=enabled)
+
 @app.route('/api/admin/jumpscare', methods=['POST'])
 def admin_jumpscare():
     """Admin löst Jumpscare auf diesem PC aus (nur wenn Freund es erlaubt hat)."""
