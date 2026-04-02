@@ -772,6 +772,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showCommands()" style="border-color:#6366f1;color:#818cf8;">
       <span class="icon">📋</span>Befehle
     </button>
+    <button class="qbtn" onclick="showSettingsF()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚙️</span>Settings
+    </button>
   </div>
 
   <div class="chat" id="chat">
@@ -880,6 +883,27 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- SETTINGS OVERLAY -->
+<div class="overlay" id="settingsFOverlay" onclick="closeOverlay('settingsFOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2>⚙️ Einstellungen</h2>
+    <div class="lbl" style="margin-top:12px;">Neues Passwort <span style="color:#555;font-weight:400;">(leer = keine Änderung)</span></div>
+    <input type="password" id="fSetPw" placeholder="Neues Passwort..." autocomplete="new-password"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:15px;outline:none;box-sizing:border-box;margin-top:6px;">
+    <div class="lbl" style="margin-top:14px;">BMO Core IP <span style="color:#555;font-weight:400;">(Tailscale-IP deines Freundes)</span></div>
+    <input type="text" id="fSetCoreIp" placeholder="100.x.x.x" autocomplete="off"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:15px;outline:none;box-sizing:border-box;margin-top:6px;">
+    <div id="fSettingsMsg" style="font-size:13px;color:#5eead4;min-height:18px;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button onclick="closeOverlay('settingsFOverlay')"
+        style="flex:1;padding:12px;border-radius:12px;border:1px solid var(--border);background:none;color:var(--text2);cursor:pointer;font-size:14px;">Abbrechen</button>
+      <button onclick="saveSettingsF()"
+        style="flex:2;padding:12px;border-radius:12px;border:none;background:var(--green);color:#000;cursor:pointer;font-size:14px;font-weight:600;">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- JUMPSCARE OVERLAY -->
 <div id="jumpscareOverlay">
   <img id="jsImg" src="/static/ui/bmo_alert.png" style="width:100%;height:100%;object-fit:cover;display:block;">
@@ -922,6 +946,43 @@ function showStats()       { updateStatus(); document.getElementById('statsOverl
 function confirmShutdown() { document.getElementById('shutdownOverlay').classList.add('show'); }
 function closeOverlay(id)  { document.getElementById(id).classList.remove('show'); }
 function showAdminOverlay(){ document.getElementById('adminOverlay').classList.add('show'); }
+
+async function showSettingsF() {
+  try {
+    const r = await fetch('/api/settings');
+    const d = await r.json();
+    document.getElementById('fSetCoreIp').value = d.core_ip || '';
+  } catch(e) {}
+  document.getElementById('fSetPw').value = '';
+  document.getElementById('fSettingsMsg').textContent = '';
+  document.getElementById('fSettingsMsg').style.color = '#5eead4';
+  document.getElementById('settingsFOverlay').classList.add('show');
+}
+
+async function saveSettingsF() {
+  const pw     = document.getElementById('fSetPw').value.trim();
+  const coreIp = document.getElementById('fSetCoreIp').value.trim();
+  const msg    = document.getElementById('fSettingsMsg');
+  msg.textContent = 'Speichere...';
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pw, core_ip: coreIp})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = 'Gespeichert ✓';
+      setTimeout(() => closeOverlay('settingsFOverlay'), 800);
+    } else {
+      msg.style.color = '#f87171';
+      msg.textContent = 'Fehler beim Speichern.';
+    }
+  } catch(e) {
+    msg.style.color = '#f87171';
+    msg.textContent = 'Verbindungsfehler.';
+  }
+}
 
 function doShutdown() {
   closeOverlay('shutdownOverlay');
@@ -1263,13 +1324,41 @@ def index():
 @login_required
 def status():
     try:
-        r = req.get(f"{CORE_URL}/status", timeout=2)
+        r = req.get(f"{CORE_URL}/status", timeout=(3, 5))
         return jsonify(r.json())
     except:
-        cpu = psutil.cpu_percent(interval=0.5)
+        cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
         t   = datetime.datetime.now().strftime('%H:%M')
         return jsonify(cpu=cpu, ram=ram, time=t, gpu=None)
+
+@app.route('/api/settings', methods=['GET'])
+@login_required
+def get_settings_f():
+    cfg = _load_config()
+    return jsonify(core_ip=cfg.get('CORE_IP', ''))
+
+@app.route('/api/settings', methods=['POST'])
+@login_required
+def save_settings_f():
+    global WEB_PASSWORD, CORE_URL
+    data = request.get_json(force=True)
+    cfg  = _load_config()
+    changed = []
+    new_pw = (data.get('password') or '').strip()
+    if new_pw:
+        cfg['WEB_PASSWORD'] = new_pw
+        WEB_PASSWORD = new_pw
+        app.secret_key = new_pw + "-bmo-secret-42"
+        session['authenticated'] = True
+        changed.append('password')
+    new_ip = (data.get('core_ip') or '').strip()
+    if new_ip:
+        cfg['CORE_IP'] = new_ip
+        CORE_URL = f"http://{new_ip}:6000"
+        changed.append('core_ip')
+    _save_config(cfg)
+    return jsonify(ok=True, changed=changed)
 
 @app.route('/api/commands')
 @login_required
