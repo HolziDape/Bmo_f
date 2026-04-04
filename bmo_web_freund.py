@@ -13,6 +13,8 @@ Wie es funktioniert:
   - Spotify, Shutdown, alles andere läuft auf DEINEM PC
   - Admin-Zugriff: Du kannst deinem Freund erlauben,
     Jumpscare oder deinen Bildschirm zu sehen (Toggle-Button)
+  - Pong & Host-Screen: Dein Freund kann dir seine Pong-Session
+    teilen und du spielst als rechtes Paddle
 """
 
 import sys
@@ -63,7 +65,7 @@ CORS(app)
 
 PORT = 5000
 
-# ── KONFIGURATION ────────────────────────────────────────────────────
+# ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
 
 def _load_config():
@@ -106,7 +108,7 @@ def login_required(f):
 
 
 # ══════════════════════════════════════════════════════════════════
-# CONFIG LESEN (Spotify — optional, aus config.txt)
+# CONFIG LESEN (config.txt — Spotify + Host-Web-Port)
 # ══════════════════════════════════════════════════════════════════
 
 def read_config():
@@ -124,6 +126,19 @@ def read_config():
     return cfg
 
 cfg = read_config()
+
+# HOST_URL: Web-Interface des Freundes (für Pong/Screen-Proxy)
+# Wird aus CORE_URL abgeleitet oder aus config.txt überschrieben.
+def _build_host_url():
+    if not CORE_URL:
+        return None
+    host_ip   = _core_ip or ""
+    web_port  = int(cfg.get("HOST_WEB_PORT", "5000"))
+    return f"http://{host_ip}:{web_port}"
+
+HOST_URL = _build_host_url()
+if HOST_URL:
+    log.info(f"Host Web: {HOST_URL}")
 
 # Spotify
 SPOTIFY_CLIENT_ID     = cfg.get("SPOTIFY_CLIENT_ID", "")
@@ -144,9 +159,9 @@ if not SPOTIFY_OK:
 # ADMIN-ZUGRIFF STATUS (In-Memory)
 # ══════════════════════════════════════════════════════════════════
 
-_admin_access     = False   # Freund hat Admin-Zugriff aktiviert
-_jumpscare_pending = False  # Admin hat Jumpscare ausgelöst
-_admin_lock       = threading.Lock()
+_admin_access      = False   # Freund hat Admin-Zugriff aktiviert
+_jumpscare_pending = False   # Admin hat Jumpscare ausgelöst
+_admin_lock        = threading.Lock()
 
 JUMPSCARE_IMAGE = os.path.join(BASE_DIR, "static", "ui", "bmo_alert.png")
 JUMPSCARE_SOUND = os.path.join(BASE_DIR, "static", "ui", "bmo_alert.mp3")
@@ -356,26 +371,20 @@ def handle_local_action(action, action_params):
             img  = ImageGrab.grab()
             path = os.path.join(BASE_DIR, "screenshot.png")
             img.save(path)
-            return f"Screenshot gespeichert!"
+            return "Screenshot gespeichert!"
         except:
             return "Screenshot fehlgeschlagen."
-    elif action == "spotify_play":
-        return local_spotify_play(action_params.get("query", ""))
-    elif action == "spotify_pause":
-        return local_spotify_pause()
-    elif action == "spotify_resume":
-        return local_spotify_resume()
-    elif action == "spotify_next":
-        return local_spotify_next()
-    elif action == "spotify_playlist":
-        return local_spotify_playlist()
-    elif action == "spotify_volume":
-        return local_spotify_volume(action_params.get("level", 50))
+    elif action == "spotify_play":    return local_spotify_play(action_params.get("query", ""))
+    elif action == "spotify_pause":   return local_spotify_pause()
+    elif action == "spotify_resume":  return local_spotify_resume()
+    elif action == "spotify_next":    return local_spotify_next()
+    elif action == "spotify_playlist": return local_spotify_playlist()
+    elif action == "spotify_volume":  return local_spotify_volume(action_params.get("level", 50))
     return None
 
 
 # ══════════════════════════════════════════════════════════════════
-# SCREEN STREAMING
+# SCREEN STREAMING (Daemon-basiert, Monitor-Picker)
 # ══════════════════════════════════════════════════════════════════
 
 _latest_frame:   bytes | None = None
@@ -634,14 +643,9 @@ HTML = """<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
-    --green: #2b8773;
-    --green-dark: #1f6458;
-    --bg: #1a1a2e;
-    --bg2: #16213e;
-    --bg3: #0f1628;
-    --border: #2b3a5c;
-    --text: #eee;
-    --text2: #aaa;
+    --green: #2b8773; --green-dark: #1f6458;
+    --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f1628;
+    --border: #2b3a5c; --text: #eee; --text2: #aaa; --text3: #64748b;
   }
   html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
   .app { display: flex; flex-direction: column; height: 100dvh; }
@@ -660,16 +664,15 @@ HTML = """<!DOCTYPE html>
   .qbtn.red { border-color: #ef4444; color: #ef4444; }
   .qbtn.orange { border-color: #f97316; color: #f97316; }
   .qbtn.purple { border-color: #a855f7; color: #a855f7; }
-  /* Admin-Toggle Button */
   .qbtn.admin-off { border-color: #475569; color: #64748b; }
   .qbtn.admin-on  { border-color: #22c55e; color: #22c55e; background: rgba(34,197,94,0.08); }
   .chat { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
   .msg { max-width: 82%; padding: 10px 13px; border-radius: 18px; font-size: 15px; line-height: 1.45; animation: fadeIn .2s ease; word-break: break-word; }
   @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1} }
   .msg.user { align-self: flex-end; background: var(--green); border-bottom-right-radius: 4px; }
-  .msg.bmo { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.bmo  { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
   .msg.bmo audio { margin-top: 8px; width: 100%; border-radius: 8px; }
-  .msg.sys { align-self: center; background: transparent; color: var(--text2); font-size: 12px; padding: 2px 8px; }
+  .msg.sys  { align-self: center; background: transparent; color: var(--text2); font-size: 12px; padding: 2px 8px; }
   .typing { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); border-radius: 18px; border-bottom-left-radius: 4px; padding: 12px 16px; display: none; }
   .typing span { display: inline-block; width: 7px; height: 7px; background: var(--green); border-radius: 50%; margin: 0 2px; animation: bounce 1.2s infinite; }
   .typing span:nth-child(2){animation-delay:.2s} .typing span:nth-child(3){animation-delay:.4s}
@@ -683,7 +686,6 @@ HTML = """<!DOCTYPE html>
   #sendBtn:disabled { opacity: .4; }
   #micBtn { background: #1e3a5f; color: #fff; }
   #micBtn.rec { background: #dc2626; animation: pulse .8s infinite; }
-  /* ── OVERLAYS ── */
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: flex-end; justify-content: center; z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s; }
   .overlay.show { opacity: 1; pointer-events: all; }
   .sheet { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 20px 16px; padding-bottom: max(20px, env(safe-area-inset-bottom)); width: 100%; max-width: 600px; transform: translateY(100%); transition: transform .25s cubic-bezier(.32,1,.23,1); max-height: 85dvh; overflow-y: auto; }
@@ -698,51 +700,30 @@ HTML = """<!DOCTYPE html>
   .stat-card .bar-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width .5s; }
   .stat-card .bar-fill.warn { background: #f97316; }
   .stat-card .bar-fill.crit { background: #ef4444; }
+  .btn-primary { width: 100%; padding: 14px; background: var(--green); border: none; border-radius: 14px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px; }
   .confirm-btns { display: flex; gap: 10px; margin-top: 8px; }
   .confirm-btns button { flex: 1; padding: 14px; border: none; border-radius: 14px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
   .confirm-btns button:active { opacity: .7; }
-  .btn-cancel  { background: var(--bg3); color: var(--text); border: 1px solid var(--border) !important; }
+  .btn-cancel { background: var(--bg3) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
   .btn-confirm { background: #ef4444; color: #fff; }
-
-  /* ── JUMPSCARE OVERLAY ── */
-  #jumpscareOverlay {
-    position: fixed; inset: 0; z-index: 9999;
-    background: #000;
-    display: flex; align-items: center; justify-content: center;
-    opacity: 0; pointer-events: none;
-    transition: opacity .05s;
-  }
-  #jumpscareOverlay.show {
-    opacity: 1; pointer-events: all;
-  }
-  #jumpscareOverlay .js-content {
-    font-size: min(40vw, 40vh);
-    animation: jsShake .08s infinite;
-    user-select: none;
-  }
+  /* Screen Overlay */
+  .screen-overlay { align-items: stretch; }
+  .screen-sheet { background: var(--bg2); width: 100%; max-width: 900px; margin: auto; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; max-height: 95dvh; }
+  .screen-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .screen-sheet img { width: 100%; display: block; object-fit: contain; flex: 1; }
+  /* Admin Info Box */
+  .admin-info { background: rgba(34,197,94,0.08); border: 1px solid #22c55e; border-radius: 14px; padding: 14px; font-size: 13px; color: #86efac; margin-bottom: 16px; line-height: 1.6; }
+  .admin-info.off { background: rgba(71,85,105,0.15); border-color: #475569; color: #64748b; }
+  /* Jumpscare Overlay */
+  #jumpscareOverlay { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .05s; }
+  #jumpscareOverlay.show { opacity: 1; pointer-events: all; }
+  #jumpscareOverlay .js-content { font-size: min(40vw, 40vh); animation: jsShake .08s infinite; user-select: none; }
   @keyframes jsShake {
     0%   { transform: translate(-4px,-4px) rotate(-2deg) scale(1.05); }
     25%  { transform: translate( 4px,-4px) rotate( 2deg) scale(0.95); }
     50%  { transform: translate(-4px, 4px) rotate(-1deg) scale(1.08); }
     75%  { transform: translate( 4px, 4px) rotate( 1deg) scale(0.92); }
     100% { transform: translate(-4px,-4px) rotate(-2deg) scale(1.05); }
-  }
-
-  /* ── ADMIN INFO BOX ── */
-  .admin-info {
-    background: rgba(34,197,94,0.08);
-    border: 1px solid #22c55e;
-    border-radius: 14px;
-    padding: 14px;
-    font-size: 13px;
-    color: #86efac;
-    margin-bottom: 16px;
-    line-height: 1.6;
-  }
-  .admin-info.off {
-    background: rgba(71,85,105,0.15);
-    border-color: #475569;
-    color: #64748b;
   }
 </style>
 </head>
@@ -765,6 +746,12 @@ HTML = """<!DOCTYPE html>
     </button>
     <button class="qbtn orange" onclick="confirmShutdown()">
       <span class="icon">⏻</span>Shutdown
+    </button>
+    <button class="qbtn" onclick="showHostScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
+      <span class="icon">🖥️</span>Host Screen
+    </button>
+    <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;">
+      <span class="icon">🏓</span>Pong
     </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
@@ -799,7 +786,7 @@ HTML = """<!DOCTYPE html>
       <div class="stat-card"><div class="val" id="sRam">--</div><div class="lbl">RAM %</div><div class="bar"><div class="bar-fill" id="sRamBar" style="width:0%"></div></div></div>
       <div class="stat-card"><div class="val" id="sTime">--</div><div class="lbl">Uhrzeit</div></div>
     </div>
-    <button onclick="closeOverlay('statsOverlay')" style="width:100%;padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;cursor:pointer;">Schließen</button>
+    <button onclick="closeOverlay('statsOverlay')" class="btn-primary" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">Schließen</button>
   </div>
 </div>
 
@@ -824,8 +811,8 @@ HTML = """<!DOCTYPE html>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
       <button onclick="spPlaylist()" style="padding:14px;background:var(--green);border:none;border-radius:14px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;">▶ Playlist</button>
       <button onclick="spPause()"    style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">⏸ Pause</button>
-      <button onclick="spResume()"  style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">▶ Weiter</button>
-      <button onclick="spSkip()"    style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">⏭ Skip</button>
+      <button onclick="spResume()"   style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">▶ Weiter</button>
+      <button onclick="spSkip()"     style="padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;">⏭ Skip</button>
     </div>
     <div style="margin-bottom:20px;">
       <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">🔊 Lautstärke</div>
@@ -839,7 +826,54 @@ HTML = """<!DOCTYPE html>
       </div>
       <div style="text-align:center;margin-top:8px;font-size:22px;font-weight:700;color:var(--green)" id="volLabel">50%</div>
     </div>
-    <button onclick="closeOverlay('spotifyOverlay')" style="width:100%;padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;cursor:pointer;">Schließen</button>
+    <button onclick="closeOverlay('spotifyOverlay')" class="btn-primary" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">Schließen</button>
+  </div>
+</div>
+
+<!-- HOST SCREEN OVERLAY -->
+<div class="overlay screen-overlay" id="hostScreenOverlay">
+  <div class="screen-sheet" onclick="event.stopPropagation()">
+    <div class="screen-header">
+      <span style="font-weight:600;font-size:15px;color:#38bdf8;">🖥️ Host – Bildschirm Live</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="hostScreenStatus" style="font-size:11px;color:#64748b;"></span>
+        <button onclick="closeHostScreen()"
+          style="background:none;border:1px solid #334155;border-radius:8px;color:#94a3b8;padding:5px 12px;cursor:pointer;font-size:13px;">
+          ✕
+        </button>
+      </div>
+    </div>
+    <img id="hostScreenImg" src="" alt="Host Bildschirm wird geladen...">
+  </div>
+</div>
+
+<!-- PONG OVERLAY -->
+<div class="overlay" id="pongOverlay" onclick="void(0)">
+  <div class="sheet" onclick="event.stopPropagation()" style="max-width:640px;">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h2 style="margin:0;">🏓 BMO Pong</h2>
+      <button onclick="closePong()"
+        style="background:none;border:1px solid var(--border);border-radius:8px;color:var(--text2);padding:5px 12px;font-size:13px;cursor:pointer;">✕</button>
+    </div>
+    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:8px;">
+      <span id="pongScoreL" style="font-size:36px;font-weight:700;color:#2b8773;">0</span>
+      <span style="font-size:36px;color:#475569;">:</span>
+      <span id="pongScoreR" style="font-size:36px;font-weight:700;color:#f97316;">0</span>
+    </div>
+    <canvas id="pongCanvas" width="600" height="380"
+      style="width:100%;display:block;border-radius:12px;background:#0a0a1a;touch-action:none;cursor:crosshair;"></canvas>
+    <div id="pongInfo" style="text-align:center;color:var(--text2);font-size:13px;margin-top:8px;">Verbinde...</div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="pongReset()"
+        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+        ↺ Reset
+      </button>
+      <button onclick="closePong()"
+        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+        Beenden
+      </button>
+    </div>
   </div>
 </div>
 
@@ -879,7 +913,7 @@ HTML = """<!DOCTYPE html>
     <div class="sheet-handle"></div>
     <h2>📋 Befehle</h2>
     <div id="commandsList" style="margin-top:8px;"></div>
-    <button onclick="closeOverlay('commandsOverlay')" style="width:100%;padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;cursor:pointer;margin-top:14px;">Schließen</button>
+    <button onclick="closeOverlay('commandsOverlay')" class="btn-primary" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);margin-top:14px;">Schließen</button>
   </div>
 </div>
 
@@ -916,7 +950,7 @@ const sendBtn= document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
 const typing = document.getElementById('typing');
 
-// ── STATUS ───────────────────────────────────────────────────────
+// ── STATUS ──────────────────────────────────────────────────────
 async function updateStatus() {
   try {
     const r = await fetch('/api/status');
@@ -945,6 +979,7 @@ setInterval(updateStatus, 5000);
 function showStats()       { updateStatus(); document.getElementById('statsOverlay').classList.add('show'); }
 function confirmShutdown() { document.getElementById('shutdownOverlay').classList.add('show'); }
 function closeOverlay(id)  { document.getElementById(id).classList.remove('show'); }
+function doShutdown()      { closeOverlay('shutdownOverlay'); quickAction('schalte den PC aus'); }
 function showAdminOverlay(){ document.getElementById('adminOverlay').classList.add('show'); }
 
 async function showSettingsF() {
@@ -984,11 +1019,6 @@ async function saveSettingsF() {
   }
 }
 
-function doShutdown() {
-  closeOverlay('shutdownOverlay');
-  quickAction('schalte den PC aus');
-}
-
 // ── SPOTIFY ──────────────────────────────────────────────────────
 async function showSpotify() {
   try {
@@ -1002,14 +1032,12 @@ async function showSpotify() {
   document.getElementById('spotifyOverlay').classList.add('show');
 }
 async function setVolume(val) {
-  try {
-    await fetch('/api/spotify/volume', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({level: parseInt(val)})});
-  } catch(e) {}
+  try { await fetch('/api/spotify/volume', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({level: parseInt(val)})}); } catch(e) {}
 }
 async function spPlaylist() { try { const r = await fetch('/api/spotify/playlist', {method:'POST'}); const d = await r.json(); addMsg(d.response, 'bmo'); } catch(e) {} }
-async function spPause()    { quickAction('pause'); }
-async function spResume()   { quickAction('weiter'); }
-async function spSkip()     { quickAction('nächstes Lied'); }
+async function spPause()   { quickAction('pause'); }
+async function spResume()  { quickAction('weiter'); }
+async function spSkip()    { quickAction('nächstes Lied'); }
 
 // ── BEFEHLE ──────────────────────────────────────────────────────
 async function showCommands() {
@@ -1036,6 +1064,111 @@ async function showCommands() {
       list.appendChild(sec);
     });
   } catch(e) { list.innerHTML = '<p style="color:var(--text2)">Fehler beim Laden.</p>'; }
+}
+
+// ── HOST SCREEN ──────────────────────────────────────────────────
+let _hostScreenActive = false;
+function showHostScreen() {
+  _hostScreenActive = true;
+  document.getElementById('hostScreenStatus').textContent = 'Verbinde...';
+  document.getElementById('hostScreenOverlay').classList.add('show');
+  const img = document.getElementById('hostScreenImg');
+  img.src = '/api/host/screen?' + Date.now();
+  img.onload  = () => { document.getElementById('hostScreenStatus').textContent = 'Live'; };
+  img.onerror = () => { document.getElementById('hostScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
+}
+function closeHostScreen() {
+  _hostScreenActive = false;
+  document.getElementById('hostScreenOverlay').classList.remove('show');
+  setTimeout(() => { if (!_hostScreenActive) document.getElementById('hostScreenImg').src = ''; }, 300);
+}
+
+// ── PONG ─────────────────────────────────────────────────────────
+let _pongActive = false, _pongRAF = null, _pongPoll = null;
+let _myPaddleY = 0.5;
+
+async function showPong() {
+  try {
+    const r = await fetch('/api/host/pong/state');
+    const d = await r.json();
+    if (!d.running) {
+      addMsg('⛔ Host spielt gerade kein Pong (oder Admin-Zugriff ist aus).', 'sys');
+      return;
+    }
+  } catch(e) { addMsg('Host nicht erreichbar 😢', 'sys'); return; }
+
+  _pongActive = true;
+  document.getElementById('pongOverlay').classList.add('show');
+  document.getElementById('pongInfo').textContent = '🟠 Du = rechtes Paddle (Maus/Touch)';
+  _startPongInput();
+  _startPongRender();
+}
+function closePong() {
+  _pongActive = false;
+  if (_pongRAF)  cancelAnimationFrame(_pongRAF);
+  if (_pongPoll) clearInterval(_pongPoll);
+  document.getElementById('pongOverlay').classList.remove('show');
+}
+async function pongReset() { closePong(); await new Promise(r => setTimeout(r, 200)); showPong(); }
+
+function _startPongInput() {
+  const canvas = document.getElementById('pongCanvas');
+  function updateY(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    _myPaddleY = Math.max(0.08, Math.min(0.92, (t.clientY - rect.top) / rect.height));
+  }
+  canvas.onmousemove  = updateY;
+  canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
+  canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
+  _pongPoll = setInterval(() => {
+    if (!_pongActive) return;
+    fetch('/api/host/pong/paddle', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({side: 'right', y: _myPaddleY})
+    }).catch(()=>{});
+  }, 40);
+}
+
+function _startPongRender() {
+  const canvas = document.getElementById('pongCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  let state = null, frame = 0;
+  async function fetchState() {
+    try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+  }
+  function loop() {
+    if (!_pongActive) return;
+    if (frame++ % 2 === 0) fetchState();
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+    ctx.setLineDash([8,12]); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
+    ctx.setLineDash([]);
+    if (state) {
+      document.getElementById('pongScoreL').textContent = state.score_l ?? 0;
+      document.getElementById('pongScoreR').textContent = state.score_r ?? 0;
+      const ph = H * 0.15, pw = 12;
+      ctx.fillStyle = '#1e4d43';
+      _rr(ctx, 8, state.left * H - ph/2, pw, ph, 4);
+      ctx.fillStyle = '#f97316';
+      _rr(ctx, W-8-pw, state.right * H - ph/2, pw, ph, 4);
+      ctx.strokeStyle='#4ade80'; ctx.lineWidth=2;
+      _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true);
+      const bx = state.ball.x * W, by = state.ball.y * H;
+      const grd = ctx.createRadialGradient(bx,by,0,bx,by,14);
+      grd.addColorStop(0,'rgba(255,255,255,.9)'); grd.addColorStop(1,'rgba(255,255,255,0)');
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx,by,14,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill();
+    }
+    _pongRAF = requestAnimationFrame(loop);
+  }
+  fetchState(); loop();
+}
+function _rr(ctx, x, y, w, h, r, stroke=false) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x,y,w,h,r); else ctx.rect(x,y,w,h);
+  stroke ? ctx.stroke() : ctx.fill();
 }
 
 // ── ADMIN TOGGLE ─────────────────────────────────────────────────
@@ -1095,7 +1228,6 @@ function triggerJumpscareLocal() {
   } catch(e) {}
   setTimeout(() => el.classList.remove('show'), 3000);
 }
-// Jumpscare auch durch Klick schließen
 document.getElementById('jumpscareOverlay').addEventListener('click', () => {
   document.getElementById('jumpscareOverlay').classList.remove('show');
 });
@@ -1157,15 +1289,14 @@ async function send() {
 }
 
 sendBtn.addEventListener('click', send);
-input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 100) + 'px'; });
+input.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+input.addEventListener('input', () => { input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,100)+'px'; });
 
-// ── MIKROFON ─────────────────────────────────────────────────────
-let mediaRecorder, audioChunks = [], recording = false;
+let mediaRecorder, audioChunks=[], recording=false;
 micBtn.addEventListener('click', async () => {
   if (!recording) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
       mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
@@ -1180,11 +1311,8 @@ micBtn.addEventListener('click', async () => {
             const d = await r.json();
             setTyping(false);
             if (d.transcript) addMsg(d.transcript, 'user');
-            addMsg(d.response, 'bmo', d.audio || null);
-          } catch(e) {
-            setTyping(false);
-            addMsg('Sprachfehler 😢', 'sys');
-          }
+            addMsg(d.response, 'bmo', d.audio||null);
+          } catch(e) { setTyping(false); addMsg('Sprachfehler 😢', 'sys'); }
         };
         reader.readAsDataURL(blob);
         stream.getTracks().forEach(t => t.stop());
@@ -1206,8 +1334,7 @@ micBtn.addEventListener('click', async () => {
 fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
 </body>
-</html>
-"""
+</html>"""
 
 
 COMMANDS = [
@@ -1245,28 +1372,31 @@ COMMANDS = [
     ]},
 ]
 
+
 # ══════════════════════════════════════════════════════════════════
-# ROUTES
+# ROUTES — CHAT / VOICE / STATUS
 # ══════════════════════════════════════════════════════════════════
 
 def _chat_and_act(message):
     try:
-        r = req.post(f"{CORE_URL}/process",
-                     json={"message": message, "remote": True},
-                     timeout=60)
+        r = req.post(f"{CORE_URL}/process", json={"message": message, "remote": True}, timeout=60)
         d = r.json()
     except Exception as e:
         return f"Core nicht erreichbar: {e}", None
-
     response_text = d.get("response", "")
     action        = d.get("action")
     action_params = d.get("action_params") or {}
-
-    local_result = handle_local_action(action, action_params)
+    local_result  = handle_local_action(action, action_params)
     if local_result:
         response_text = local_result
-
-    return response_text, None
+    audio_b64 = None
+    if response_text:
+        try:
+            rs = req.post(f"{CORE_URL}/speak", json={"text": response_text}, timeout=120)
+            audio_b64 = rs.json().get("audio")
+        except:
+            pass
+    return response_text, audio_b64
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1288,7 +1418,7 @@ def logout():
 
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
-    global WEB_PASSWORD, CORE_URL
+    global WEB_PASSWORD, CORE_URL, HOST_URL
     if WEB_PASSWORD and CORE_URL:
         return redirect(url_for('login'))
     error = None
@@ -1303,12 +1433,13 @@ def setup():
         elif pw != pw2:
             error = 'Passwörter stimmen nicht überein.'
         else:
-            cfg = _load_config()
-            cfg['WEB_PASSWORD'] = pw
-            cfg['CORE_IP']      = core_ip
-            _save_config(cfg)
+            cfg_data = _load_config()
+            cfg_data['WEB_PASSWORD'] = pw
+            cfg_data['CORE_IP']      = core_ip
+            _save_config(cfg_data)
             WEB_PASSWORD   = pw
             CORE_URL       = f"http://{core_ip}:6000"
+            HOST_URL       = f"http://{core_ip}:5000"
             app.secret_key = pw + "-bmo-secret-42"
             session['authenticated'] = True
             log.info(f"Ersteinrichtung abgeschlossen. Core: {CORE_URL}")
@@ -1327,7 +1458,7 @@ def status():
         r = req.get(f"{CORE_URL}/status", timeout=(3, 5))
         return jsonify(r.json())
     except:
-        cpu = psutil.cpu_percent()
+        cpu = psutil.cpu_percent(interval=0.5)
         ram = psutil.virtual_memory().percent
         t   = datetime.datetime.now().strftime('%H:%M')
         return jsonify(cpu=cpu, ram=ram, time=t, gpu=None)
@@ -1335,29 +1466,30 @@ def status():
 @app.route('/api/settings', methods=['GET'])
 @login_required
 def get_settings_f():
-    cfg = _load_config()
-    return jsonify(core_ip=cfg.get('CORE_IP', ''))
+    cfg_data = _load_config()
+    return jsonify(core_ip=cfg_data.get('CORE_IP', ''))
 
 @app.route('/api/settings', methods=['POST'])
 @login_required
 def save_settings_f():
-    global WEB_PASSWORD, CORE_URL
+    global WEB_PASSWORD, CORE_URL, HOST_URL
     data = request.get_json(force=True)
-    cfg  = _load_config()
+    cfg_data = _load_config()
     changed = []
     new_pw = (data.get('password') or '').strip()
     if new_pw:
-        cfg['WEB_PASSWORD'] = new_pw
+        cfg_data['WEB_PASSWORD'] = new_pw
         WEB_PASSWORD = new_pw
         app.secret_key = new_pw + "-bmo-secret-42"
         session['authenticated'] = True
         changed.append('password')
     new_ip = (data.get('core_ip') or '').strip()
     if new_ip:
-        cfg['CORE_IP'] = new_ip
+        cfg_data['CORE_IP'] = new_ip
         CORE_URL = f"http://{new_ip}:6000"
+        HOST_URL = f"http://{new_ip}:5000"
         changed.append('core_ip')
-    _save_config(cfg)
+    _save_config(cfg_data)
     return jsonify(ok=True, changed=changed)
 
 @app.route('/api/commands')
@@ -1383,20 +1515,23 @@ def voice_endpoint():
     if not b64:
         return jsonify(transcript='', response='Kein Audio empfangen.', audio=None)
     try:
-        tr = req.post(f"{CORE_URL}/transcribe",
-                      json={"audio": b64, "format": "webm", "remote": True},
-                      timeout=30)
-        d = tr.json()
-        transcript = d.get('transcript', '')
+        tr = req.post(f"{CORE_URL}/transcribe", json={"audio": b64, "format": "webm", "remote": True}, timeout=30)
+        d  = tr.json()
+        transcript    = d.get('transcript', '')
         if not transcript:
             return jsonify(transcript='', response='Ich habe dich nicht verstanden.', audio=None)
-        action        = d.get("action")
-        action_params = d.get("action_params", {})
         response_text = d.get("response", "")
-        local_result  = handle_local_action(action, action_params)
+        local_result  = handle_local_action(d.get("action"), d.get("action_params", {}))
         if local_result:
             response_text = local_result
-        return jsonify(transcript=transcript, response=response_text, audio=None)
+        audio_b64 = None
+        if response_text:
+            try:
+                rs = req.post(f"{CORE_URL}/speak", json={"text": response_text}, timeout=120)
+                audio_b64 = rs.json().get("audio")
+            except:
+                pass
+        return jsonify(transcript=transcript, response=response_text, audio=audio_b64)
     except Exception as e:
         return jsonify(transcript='', response=f"Fehler: {e}", audio=None)
 
@@ -1423,7 +1558,61 @@ def history_clear():
     return jsonify(status="ok")
 
 
-# ── ADMIN ROUTES ──────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+# ROUTES — HOST PROXY (Zugriff auf deines Freundes BMO)
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/host/screen')
+@login_required
+def host_screen():
+    if not HOST_URL:
+        return jsonify(error="Host-URL nicht konfiguriert."), 503
+    try:
+        r = req.get(f"{HOST_URL}/api/admin/screen", stream=True, timeout=10)
+        if r.status_code == 403:
+            return jsonify(error="Host hat Admin-Zugriff nicht aktiviert."), 403
+        return Response(r.iter_content(chunk_size=4096),
+                        content_type=r.headers.get('Content-Type', 'multipart/x-mixed-replace; boundary=frame'))
+    except Exception as e:
+        return jsonify(error=str(e)), 503
+
+@app.route('/api/host/pong/state')
+@login_required
+def host_pong_state():
+    if not HOST_URL:
+        return jsonify(running=False, error="Host-URL nicht konfiguriert.")
+    try:
+        r = req.get(f"{HOST_URL}/api/admin/pong/state", timeout=3)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(running=False, error=str(e))
+
+@app.route('/api/host/pong/paddle', methods=['POST'])
+@login_required
+def host_pong_paddle():
+    if not HOST_URL:
+        return jsonify(ok=False, error="Host-URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{HOST_URL}/api/admin/pong/paddle", json=request.json or {}, timeout=2)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/host/notify', methods=['POST'])
+@login_required
+def host_notify():
+    if not HOST_URL:
+        return jsonify(ok=False, error="Host-URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{HOST_URL}/api/admin/notify", json=request.json or {}, timeout=5)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# ROUTES — ADMIN (dein Freund greift auf DICH zu)
+# ══════════════════════════════════════════════════════════════════
 
 @app.route('/api/admin/toggle', methods=['POST'])
 def admin_toggle():
@@ -1432,7 +1621,7 @@ def admin_toggle():
     with _admin_lock:
         _admin_access = not _admin_access
         if not _admin_access:
-            _jumpscare_pending = False  # aufräumen beim Deaktivieren
+            _jumpscare_pending = False
         enabled = _admin_access
     log.info(f"Admin-Zugriff: {'aktiviert' if enabled else 'deaktiviert'}")
     return jsonify(enabled=enabled)
@@ -1443,7 +1632,7 @@ def admin_poll():
     global _jumpscare_pending
     with _admin_lock:
         js = _jumpscare_pending
-        _jumpscare_pending = False  # einmal lesen = konsumieren
+        _jumpscare_pending = False
     return jsonify(jumpscare=js)
 
 @app.route('/api/admin/info')
@@ -1467,15 +1656,14 @@ def admin_jumpscare():
 
 @app.route('/api/admin/screen')
 def admin_screen():
-    """Admin streamt den Bildschirm des Freundes (nur wenn erlaubt)."""
+    """Admin streamt den Bildschirm (nur wenn Admin-Zugriff aktiv)."""
     with _admin_lock:
         allowed = _admin_access
     if not allowed:
         return jsonify(error="Zugriff nicht erlaubt."), 403
     if not _SCREEN_OK:
-        return jsonify(error="Pillow nicht installiert."), 503
-    return Response(_screen_generator(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+        return jsonify(error="mss/Pillow nicht installiert: pip install mss Pillow"), 503
+    return Response(_screen_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/admin/screen/monitors')
 def admin_screen_monitors():
@@ -1511,6 +1699,225 @@ def admin_screen_set_monitor():
         _selected_monitor = int(idx)
     return jsonify(ok=True, active=_selected_monitor)
 
+@app.route('/api/admin/pong/state')
+def admin_pong_state():
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    # Freund-Version hat kein eigenes Pong — leere State zurückgeben
+    return jsonify(running=False, ball={'x':0.5,'y':0.5,'vx':0,'vy':0},
+                   left=0.5, right=0.5, score_l=0, score_r=0, right_human=False)
+
+@app.route('/api/admin/pong/paddle', methods=['POST'])
+def admin_pong_paddle():
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    return jsonify(ok=True)
+
+@app.route('/api/admin/pong/challenge', methods=['POST'])
+def admin_pong_challenge():
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    try:
+        from winotify import Notification
+        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus!")
+        toast.show()
+    except Exception:
+        pass
+    return jsonify(ok=True)
+
+@app.route('/api/admin/notify', methods=['POST'])
+def admin_notify():
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    data    = request.json or {}
+    title   = str(data.get('title', 'BMO'))[:64]
+    message = str(data.get('message', ''))[:256]
+    if not message:
+        return jsonify(ok=False, error="Keine Nachricht.")
+    try:
+        try:
+            from winotify import Notification
+            toast = Notification(app_id="BMO", title=title, msg=message)
+            toast.show()
+        except ImportError:
+            t = title.replace('"','').replace("'",'')
+            m = message.replace('"','').replace("'",'')
+            ps = (
+                'Add-Type -AssemblyName System.Windows.Forms;'
+                '$n=New-Object System.Windows.Forms.NotifyIcon;'
+                '$n.Icon=[System.Drawing.SystemIcons]::Information;'
+                '$n.Visible=$true;'
+                f'$n.ShowBalloonTip(4000,\'{t}\',\'{m}\',[System.Windows.Forms.ToolTipIcon]::Info);'
+                'Start-Sleep 5; $n.Dispose()'
+            )
+            subprocess.Popen(['powershell', '-WindowStyle', 'Hidden', '-Command', ps])
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route('/api/admin/processes')
+def admin_processes():
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    procs = []
+    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+        try:
+            info = p.info
+            procs.append({'pid': info['pid'], 'name': info['name'] or '?',
+                          'cpu': round(info['cpu_percent'] or 0, 1),
+                          'mem': round(info['memory_percent'] or 0, 1)})
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    procs.sort(key=lambda x: x['mem'], reverse=True)
+    return jsonify(processes=procs[:80])
+
+@app.route('/api/admin/processes/<int:pid>/kill', methods=['POST'])
+def admin_kill_process(pid):
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    try:
+        p = psutil.Process(pid)
+        name = p.name()
+        p.terminate()
+        return jsonify(ok=True, name=name)
+    except psutil.NoSuchProcess:
+        return jsonify(ok=False, error="Prozess nicht gefunden.")
+    except psutil.AccessDenied:
+        return jsonify(ok=False, error="Zugriff verweigert.")
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# DRAWING OVERLAY (Admin zeichnet auf deinem Bildschirm)
+# ══════════════════════════════════════════════════════════════════
+
+_draw_strokes = []
+_draw_lock    = threading.Lock()
+_draw_active  = False
+
+def _draw_overlay_thread(monitor=None):
+    global _draw_active
+    try:
+        import tkinter as tk
+        _draw_active = True
+        root = tk.Tk()
+        root.overrideredirect(True)
+        if monitor:
+            sw = monitor['w']
+            sh = monitor['h']
+            mx = monitor['x']
+            my = monitor['y']
+        else:
+            sw = root.winfo_screenwidth()
+            sh = root.winfo_screenheight()
+            mx, my = 0, 0
+        root.geometry(f"{sw}x{sh}+{mx}+{my}")
+        root.attributes('-topmost', True)
+        root.configure(bg='black')
+        root.attributes('-transparentcolor', 'black')
+        cv = tk.Canvas(root, width=sw, height=sh, bg='black', highlightthickness=0)
+        cv.pack()
+        _items = []
+
+        def _refresh():
+            nonlocal _items
+            for it in _items:
+                cv.delete(it)
+            _items = []
+            if not _draw_active:
+                root.destroy()
+                return
+            with _draw_lock:
+                strokes = list(_draw_strokes)
+            for stroke in strokes:
+                pts = stroke.get('pts', [])
+                col = stroke.get('color', '#ff3333')
+                w   = stroke.get('width', 5)
+                for i in range(len(pts) - 1):
+                    x1, y1 = pts[i][0] * sw,   pts[i][1] * sh
+                    x2, y2 = pts[i+1][0] * sw, pts[i+1][1] * sh
+                    it = cv.create_line(x1, y1, x2, y2, fill=col, width=w,
+                                        capstyle=tk.ROUND, joinstyle=tk.ROUND)
+                    _items.append(it)
+            root.after(80, _refresh)
+
+        root.after(80, _refresh)
+        root.mainloop()
+    except Exception as e:
+        log.warning(f"Draw overlay Fehler: {e}")
+    finally:
+        _draw_active = False
+
+@app.route('/api/admin/draw', methods=['POST'])
+def admin_draw():
+    """Freund zeichnet auf deinem Bildschirm (erfordert Admin-Zugriff)."""
+    global _draw_strokes, _draw_active
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    data   = request.json or {}
+    action = data.get('action', 'add')
+    if action == 'clear':
+        with _draw_lock:
+            _draw_strokes = []
+        return jsonify(ok=True)
+    elif action == 'close':
+        _draw_active = False
+        with _draw_lock:
+            _draw_strokes = []
+        return jsonify(ok=True)
+    elif action == 'add':
+        seg = {
+            'pts':   data.get('pts', []),
+            'color': data.get('color', '#ff3333'),
+            'width': min(int(data.get('width', 5)), 24),
+        }
+        with _draw_lock:
+            _draw_strokes.append(seg)
+        if not _draw_active:
+            mon_idx = data.get('monitor', 1)
+            monitor = None
+            try:
+                with _mss_lib.mss() as sct:
+                    idx = int(mon_idx) if mon_idx else 1
+                    m = sct.monitors[idx] if idx < len(sct.monitors) else sct.monitors[1]
+                    monitor = {'x': m['left'], 'y': m['top'], 'w': m['width'], 'h': m['height']}
+            except Exception:
+                pass
+            threading.Thread(target=_draw_overlay_thread, args=(monitor,), daemon=True).start()
+        return jsonify(ok=True)
+    return jsonify(ok=False, error="Unbekannte Aktion.")
+
+@app.route('/api/admin/draw/monitors', methods=['GET'])
+def admin_draw_monitors():
+    """Gibt Monitore des Freundes zurück (für Draw-Monitor-Auswahl)."""
+    with _admin_lock:
+        allowed = _admin_access
+    if not allowed:
+        return jsonify(error="Zugriff nicht erlaubt."), 403
+    try:
+        with _mss_lib.mss() as sct:
+            monitors = []
+            for i, m in enumerate(sct.monitors[1:], 1):
+                monitors.append({'idx': i, 'label': f'Monitor {i}', 'x': m['left'], 'y': m['top'], 'w': m['width'], 'h': m['height']})
+        return jsonify(monitors=monitors, active=1)
+    except Exception:
+        return jsonify(monitors=[{'idx': 1, 'label': 'Monitor 1', 'x': 0, 'y': 0, 'w': 1920, 'h': 1080}], active=1)
+
 
 # ══════════════════════════════════════════════════════════════════
 # START
@@ -1519,8 +1926,9 @@ def admin_screen_set_monitor():
 if __name__ == '__main__':
     log.info(f"BMO Web (Freund-Version) startet auf Port {PORT}...")
     log.info(f"Core: {CORE_URL or 'nicht konfiguriert'}")
+    log.info(f"Host Web: {HOST_URL or 'nicht konfiguriert'}")
     log.info(f"Spotify konfiguriert: {SPOTIFY_OK}")
-    log.info(f"Screen-Streaming: {'OK' if _SCREEN_OK else 'Pillow fehlt'}")
+    log.info(f"Screen-Streaming: {'OK (' + _SCREEN_BACKEND + ')' if _SCREEN_OK else 'Pillow/mss fehlt'}")
 
     if CORE_URL:
         try:
