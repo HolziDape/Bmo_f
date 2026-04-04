@@ -6,6 +6,18 @@ Das Denken (KI, Stimme) läuft auf dem PC deines Freundes. Spotify, Shutdown und
 
 ---
 
+## ⚡ Schnell-Installation (empfohlen)
+
+**PowerShell** öffnen (`Win + X` → „Windows PowerShell") und diesen Befehl einfügen:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/HolziDape/Bmo_f/main/install.ps1 | iex"
+```
+
+> Das Skript installiert automatisch: Python, Git, alle Pakete — dann öffnet sich der BMO-Ordner.
+
+---
+
 ## ✨ Was du damit kannst
 
 | Feature | Beschreibung |
