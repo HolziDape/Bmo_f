@@ -29,13 +29,18 @@ import io
 # ── LOGGING ────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(BASE_DIR, "bmo_web.log")
+
+handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    handlers.append(logging.FileHandler(LOG_PATH, encoding="utf-8"))
+except PermissionError:
+    _fallback = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "bmo_web.log")
+    handlers.append(logging.FileHandler(_fallback, encoding="utf-8"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=handlers
 )
 log = logging.getLogger("BMO-Web-Freund")
 
