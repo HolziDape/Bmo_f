@@ -1,0 +1,14 @@
+# Logs
+bmo_web.log
+
+# Spotify Cache
+.spotify_cache
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Windows
+Thumbs.db
+desktop.ini
