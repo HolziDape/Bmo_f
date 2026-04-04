@@ -1104,17 +1104,20 @@ let _pongActive = false, _pongRAF = null, _pongPoll = null;
 let _myPaddleY = 0.5;
 
 async function showPong() {
+  document.getElementById('pongOverlay').classList.add('show');
+  document.getElementById('pongInfo').textContent = 'Verbinde...';
   try {
     const r = await fetch('/api/host/pong/state');
     const d = await r.json();
     if (!d.running) {
-      addMsg('⛔ Host spielt gerade kein Pong (oder Admin-Zugriff ist aus).', 'sys');
+      document.getElementById('pongInfo').textContent = '⏳ Kein aktives Spiel — fordere deinen Freund heraus!';
       return;
     }
-  } catch(e) { addMsg('Host nicht erreichbar 😢', 'sys'); return; }
-
+  } catch(e) {
+    document.getElementById('pongInfo').textContent = '❌ Host nicht erreichbar';
+    return;
+  }
   _pongActive = true;
-  document.getElementById('pongOverlay').classList.add('show');
   document.getElementById('pongInfo').textContent = '🟠 Du = rechtes Paddle (Maus/Touch)';
   _startPongInput();
   _startPongRender();
