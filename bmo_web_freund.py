@@ -1794,7 +1794,7 @@ def host_pong_challenge():
     if not HOST_URL:
         return jsonify(ok=False, error="Host-URL nicht konfiguriert.")
     try:
-        r = req.post(f"{HOST_URL}/api/pong/challenge", timeout=5)
+        r = req.post(f"{HOST_URL}/api/admin/pong/challenge", timeout=5)
         return jsonify(**r.json())
     except Exception as e:
         return jsonify(ok=False, error=str(e))
