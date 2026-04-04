@@ -83,9 +83,19 @@ if (-not $gitOk) {
 # ── 3. Repo klonen ────────────────────────────────────────────────────────────
 Write-Header "Schritt 3: BMO-Freund herunterladen"
 
-$installDir = Join-Path $HOME "BMO_Freund"
+$defaultDir = Join-Path $HOME "BMO_Freund"
+Write-Host "  Wo soll BMO-Freund installiert werden?" -ForegroundColor White
+Write-Host "  [ENTER druecken fuer Standard: $defaultDir]" -ForegroundColor DarkGray
+$userInput = Read-Host "  Pfad"
+if ([string]::IsNullOrWhiteSpace($userInput)) {
+    $installDir = $defaultDir
+} else {
+    $installDir = $userInput.Trim('"').Trim("'")
+}
+Write-OK "Installiere nach: $installDir"
+
 if (Test-Path $installDir) {
-    Write-Info "Ordner '$installDir' existiert bereits — wird aktualisiert (git pull)..."
+    Write-Info "Ordner existiert bereits — wird aktualisiert (git pull)..."
     Set-Location $installDir
     & git pull
 } else {
