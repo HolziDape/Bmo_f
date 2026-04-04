@@ -869,7 +869,18 @@ HTML = """<!DOCTYPE html>
     <canvas id="pongCanvas" width="600" height="380"
       style="width:100%;display:block;border-radius:12px;background:#0a0a1a;touch-action:none;cursor:crosshair;"></canvas>
     <div id="pongInfo" style="text-align:center;color:var(--text2);font-size:13px;margin-top:8px;">Verbinde...</div>
+    <div id="pongChallengeBanner" style="display:none;margin-top:10px;padding:12px;background:#1e3a2f;border:1px solid #4ade80;border-radius:12px;text-align:center;">
+      <div style="color:#4ade80;font-size:15px;margin-bottom:8px;">🏓 Dein Freund fordert dich heraus!</div>
+      <button onclick="acceptPongChallenge()"
+        style="padding:10px 24px;background:#4ade80;border:none;border-radius:10px;color:#000;font-size:14px;font-weight:700;cursor:pointer;">
+        ✅ Annehmen
+      </button>
+    </div>
     <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="challengeHost()"
+        style="flex:1;padding:12px;background:var(--bg3);border:1px solid #f97316;border-radius:12px;color:#f97316;font-size:14px;cursor:pointer;">
+        🏓 Herausfordern
+      </button>
       <button onclick="pongReset()"
         style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
         ↺ Reset
@@ -1115,6 +1126,32 @@ function closePong() {
   document.getElementById('pongOverlay').classList.remove('show');
 }
 async function pongReset() { closePong(); await new Promise(r => setTimeout(r, 200)); showPong(); }
+
+async function challengeHost() {
+  try {
+    const r = await fetch('/api/host/pong/challenge', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) addMsg('🏓 Challenge gesendet! Dein Freund wurde benachrichtigt.', 'sys');
+    else addMsg('❌ Challenge fehlgeschlagen: ' + (d.error||''), 'sys');
+  } catch(e) { addMsg('Host nicht erreichbar 😢', 'sys'); }
+}
+
+async function acceptPongChallenge() {
+  document.getElementById('pongChallengeBanner').style.display = 'none';
+  await showPong();
+}
+
+// Polling: prüfen ob Admin uns herausfordert
+setInterval(async () => {
+  try {
+    const r = await fetch('/api/pong/pending');
+    const d = await r.json();
+    if (d.pending) {
+      document.getElementById('pongChallengeBanner').style.display = 'block';
+      document.getElementById('pongOverlay').classList.add('show');
+    }
+  } catch(e) {}
+}, 5000);
 
 function _startPongInput() {
   const canvas = document.getElementById('pongCanvas');
@@ -1722,19 +1759,45 @@ def admin_pong_paddle():
         return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
     return jsonify(ok=True)
 
+_pong_pending = False
+_pong_pending_lock = threading.Lock()
+
 @app.route('/api/admin/pong/challenge', methods=['POST'])
 def admin_pong_challenge():
+    global _pong_pending
     with _admin_lock:
         allowed = _admin_access
     if not allowed:
         return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    with _pong_pending_lock:
+        _pong_pending = True
     try:
         from winotify import Notification
-        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus!")
+        toast = Notification(app_id="BMO", title="🏓 Pong-Challenge!", msg="Dein Freund fordert dich heraus! BMO öffnen um anzunehmen.")
         toast.show()
     except Exception:
         pass
     return jsonify(ok=True)
+
+@app.route('/api/pong/pending')
+@login_required
+def pong_pending():
+    global _pong_pending
+    with _pong_pending_lock:
+        p = _pong_pending
+        _pong_pending = False  # einmal abgefragt → zurücksetzen
+    return jsonify(pending=p)
+
+@app.route('/api/host/pong/challenge', methods=['POST'])
+@login_required
+def host_pong_challenge():
+    if not HOST_URL:
+        return jsonify(ok=False, error="Host-URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{HOST_URL}/api/pong/challenge", timeout=5)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 @app.route('/api/admin/notify', methods=['POST'])
 def admin_notify():
