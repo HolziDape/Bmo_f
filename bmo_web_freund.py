@@ -68,7 +68,7 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
-PORT = 5001
+PORT = 5000
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
