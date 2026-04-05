@@ -960,6 +960,8 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+let ADMIN_URL = null;
+fetch('/api/config').then(r=>r.json()).then(d=>{ ADMIN_URL = d.host_url || null; });
 const chat   = document.getElementById('chat');
 const input  = document.getElementById('input');
 const sendBtn= document.getElementById('sendBtn');
@@ -1168,12 +1170,13 @@ function _startPongInput() {
   canvas.onmousemove  = updateY;
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
+  const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
   let _lastSentY = -1;
   _pongPoll = setInterval(() => {
     if (!_pongActive) return;
     if (Math.abs(_myPaddleY - _lastSentY) < 0.005) return;
     _lastSentY = _myPaddleY;
-    fetch('/api/host/pong/paddle', {
+    fetch(_paddleUrl, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({side: 'right', y: _myPaddleY})
     }).catch(()=>{});
@@ -1187,13 +1190,14 @@ function _startPongRender() {
   let state = null;
   let _fetching = false;
 
-  // State alle 50ms holen — unabhängig vom Render-Loop
+  // State alle 50ms holen — direkt vom Admin wenn möglich
+  const _stateUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/state` : '/api/host/pong/state';
   async function pollState() {
     if (!_pongActive) return;
     if (_fetching) return;
     _fetching = true;
     try {
-      const r = await fetch('/api/host/pong/state');
+      const r = await fetch(_stateUrl);
       state = await r.json();
       if (state.score_l !== undefined) {
         document.getElementById('pongScoreL').textContent = state.score_l;
@@ -1514,6 +1518,11 @@ def setup():
 @login_required
 def index():
     return HTML
+
+@app.route('/api/config')
+@login_required
+def api_config():
+    return jsonify(host_url=HOST_URL or None)
 
 @app.route('/api/status')
 @login_required
