@@ -961,7 +961,8 @@ HTML = """<!DOCTYPE html>
 
 <script>
 let ADMIN_URL = null;
-fetch('/api/config').then(r=>r.json()).then(d=>{ ADMIN_URL = d.host_url || null; });
+let _adminUrlReady = false;
+const _adminUrlPromise = fetch('/api/config').then(r=>r.json()).then(d=>{ ADMIN_URL = d.host_url || null; _adminUrlReady = true; });
 const chat   = document.getElementById('chat');
 const input  = document.getElementById('input');
 const sendBtn= document.getElementById('sendBtn');
@@ -1120,6 +1121,7 @@ async function showPong() {
     return;
   }
   // Admin sagen dass Freund rechts spielt
+  await _adminUrlPromise;  // warten bis ADMIN_URL geladen
   await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
   _pongActive = true;
   document.getElementById('pongInfo').textContent = '🟠 Du = rechtes Paddle (Maus/Touch)';
@@ -1237,7 +1239,7 @@ function _startPongRender() {
     }
     _pongRAF = requestAnimationFrame(loop);
   }
-  pollState(); loop();
+  loop();
 }
 function _rr(ctx, x, y, w, h, r, stroke=false) {
   ctx.beginPath();
