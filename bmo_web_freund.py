@@ -1231,11 +1231,22 @@ function _startPongRender() {
       _rr(ctx, W-8-pw, state.right * H - ph/2, pw, ph, 4);
       ctx.strokeStyle='#4ade80'; ctx.lineWidth=2;
       _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true);
-      const bx = state.ball.x * W, by = state.ball.y * H;
-      const grd = ctx.createRadialGradient(bx,by,0,bx,by,14);
-      grd.addColorStop(0,'rgba(255,255,255,.9)'); grd.addColorStop(1,'rgba(255,255,255,0)');
-      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx,by,14,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill();
+      // Ball nur wenn Spiel läuft
+      if (state.friend_ready || !state.right_human) {
+        const bx = state.ball.x * W, by = state.ball.y * H;
+        const grd = ctx.createRadialGradient(bx,by,0,bx,by,14);
+        grd.addColorStop(0,'rgba(255,255,255,.9)'); grd.addColorStop(1,'rgba(255,255,255,0)');
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(bx,by,14,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill();
+      }
+      // Countdown
+      if (state.countdown > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#4ade80'; ctx.font = 'bold 96px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(state.countdown, W/2, H/2);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
     }
     _pongRAF = requestAnimationFrame(loop);
   }
