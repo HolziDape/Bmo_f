@@ -1117,6 +1117,8 @@ async function showPong() {
     document.getElementById('pongInfo').textContent = '❌ Host nicht erreichbar';
     return;
   }
+  // Admin sagen dass Freund rechts spielt
+  await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
   _pongActive = true;
   document.getElementById('pongInfo').textContent = '🟠 Du = rechtes Paddle (Maus/Touch)';
   _startPongInput();
@@ -1648,6 +1650,17 @@ def host_pong_state():
         return jsonify(**r.json())
     except Exception as e:
         return jsonify(running=False, error=str(e))
+
+@app.route('/api/host/pong/join', methods=['POST'])
+@login_required
+def host_pong_join():
+    if not HOST_URL:
+        return jsonify(ok=False, error="Host-URL nicht konfiguriert.")
+    try:
+        r = req.post(f"{HOST_URL}/api/admin/pong/join", timeout=3)
+        return jsonify(**r.json())
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 @app.route('/api/host/pong/paddle', methods=['POST'])
 @login_required
