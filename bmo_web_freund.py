@@ -1241,16 +1241,16 @@ function _startPongRender() {
   let state = null;
 
   if (_pongMode === 'local') {
-    // Lokales Spiel: polling gegen eigenen Server
-    const _statePoll = setInterval(async () => {
-      if (!_pongActive) { clearInterval(_statePoll); return; }
+    // Lokales Spiel: SSE für 60fps State-Updates
+    const _sse = new EventSource('/api/pong/local/stream');
+    _pongSSE = _sse;
+    _sse.onmessage = e => {
       try {
-        const s = await (await fetch('/api/pong/local/state')).json();
-        state = s;
-        document.getElementById('pongScoreL').textContent = s.score_l ?? 0;
-        document.getElementById('pongScoreR').textContent = s.score_r ?? 0;
+        state = JSON.parse(e.data);
+        document.getElementById('pongScoreL').textContent = state.score_l ?? 0;
+        document.getElementById('pongScoreR').textContent = state.score_r ?? 0;
       } catch(e) {}
-    }, 50);
+    };
   } else {
     // Remote: SSE direkt vom Admin
     if (ADMIN_URL) {
@@ -1976,6 +1976,25 @@ def pong_local_stop():
     with _lp_lock:
         _lp['running'] = False
     return jsonify(ok=True)
+
+@app.route('/api/pong/local/stream')
+@login_required
+def pong_local_stream():
+    import json as _json
+    def generate():
+        while True:
+            with _lp_lock:
+                cu = _lp['countdown_until']
+                cd = max(0, _math.ceil(cu - _time.time())) if cu > 0 else 0
+                s = dict(ball=dict(_lp['ball']), left=_lp['left'], right=_lp['right'],
+                         score_l=_lp['score_l'], score_r=_lp['score_r'],
+                         running=_lp['running'], countdown=cd, friend_ready=True)
+            yield f"data: {_json.dumps(s)}\n\n"
+            _time.sleep(0.016)
+    resp = Response(generate(), mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'
+    return resp
 
 _pong_pending = False
 _pong_pending_lock = threading.Lock()
