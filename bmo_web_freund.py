@@ -861,34 +861,45 @@ HTML = """<!DOCTYPE html>
       <button onclick="closePong()"
         style="background:none;border:1px solid var(--border);border-radius:8px;color:var(--text2);padding:5px 12px;font-size:13px;cursor:pointer;">✕</button>
     </div>
-    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:8px;">
-      <span id="pongScoreL" style="font-size:36px;font-weight:700;color:#2b8773;">0</span>
-      <span style="font-size:36px;color:#475569;">:</span>
-      <span id="pongScoreR" style="font-size:36px;font-weight:700;color:#f97316;">0</span>
-    </div>
-    <canvas id="pongCanvas" width="600" height="380"
-      style="width:100%;display:block;border-radius:12px;background:#0a0a1a;touch-action:none;cursor:crosshair;"></canvas>
-    <div id="pongInfo" style="text-align:center;color:var(--text2);font-size:13px;margin-top:8px;">Verbinde...</div>
-    <div id="pongChallengeBanner" style="display:none;margin-top:10px;padding:12px;background:#1e3a2f;border:1px solid #4ade80;border-radius:12px;text-align:center;">
-      <div style="color:#4ade80;font-size:15px;margin-bottom:8px;">🏓 Dein Freund fordert dich heraus!</div>
-      <button onclick="acceptPongChallenge()"
-        style="padding:10px 24px;background:#4ade80;border:none;border-radius:10px;color:#000;font-size:14px;font-weight:700;cursor:pointer;">
-        ✅ Annehmen
+    <!-- Mode-Auswahl -->
+    <div id="pongModeSelect" style="display:flex;flex-direction:column;gap:12px;padding:20px 0;">
+      <div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:4px;">Was möchtest du spielen?</div>
+      <button onclick="startLocalPong()"
+        style="padding:16px;background:var(--bg3);border:2px solid #4ade80;border-radius:14px;color:#4ade80;font-size:16px;font-weight:700;cursor:pointer;">
+        🤖 Gegen KI spielen
       </button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:10px;">
       <button onclick="challengeHost()"
-        style="flex:1;padding:12px;background:var(--bg3);border:1px solid #f97316;border-radius:12px;color:#f97316;font-size:14px;cursor:pointer;">
-        🏓 Herausfordern
+        style="padding:16px;background:var(--bg3);border:2px solid #f97316;border-radius:14px;color:#f97316;font-size:16px;font-weight:700;cursor:pointer;">
+        ⚔️ Admin herausfordern
       </button>
-      <button onclick="pongReset()"
-        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
-        ↺ Reset
-      </button>
-      <button onclick="closePong()"
-        style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
-        Beenden
-      </button>
+    </div>
+    <!-- Spiel -->
+    <div id="pongGame" style="display:none;">
+      <div style="display:flex;justify-content:center;gap:24px;margin-bottom:8px;">
+        <span id="pongScoreL" style="font-size:36px;font-weight:700;color:#2b8773;">0</span>
+        <span style="font-size:36px;color:#475569;">:</span>
+        <span id="pongScoreR" style="font-size:36px;font-weight:700;color:#f97316;">0</span>
+      </div>
+      <canvas id="pongCanvas" width="600" height="380"
+        style="width:100%;display:block;border-radius:12px;background:#0a0a1a;touch-action:none;cursor:crosshair;"></canvas>
+      <div id="pongInfo" style="text-align:center;color:var(--text2);font-size:13px;margin-top:8px;"></div>
+      <div id="pongChallengeBanner" style="display:none;margin-top:10px;padding:12px;background:#1e3a2f;border:1px solid #4ade80;border-radius:12px;text-align:center;">
+        <div style="color:#4ade80;font-size:15px;margin-bottom:8px;">🏓 Admin fordert dich heraus!</div>
+        <button onclick="acceptPongChallenge()"
+          style="padding:10px 24px;background:#4ade80;border:none;border-radius:10px;color:#000;font-size:14px;font-weight:700;cursor:pointer;">
+          ✅ Annehmen
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button onclick="pongReset()"
+          style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+          ↺ Neu
+        </button>
+        <button onclick="closePong()"
+          style="flex:1;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;">
+          Beenden
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -1103,53 +1114,81 @@ function closeHostScreen() {
 }
 
 // ── PONG ─────────────────────────────────────────────────────────
-let _pongActive = false, _pongRAF = null, _pongPoll = null;
+let _pongActive = false, _pongRAF = null, _pongPoll = null, _pongSSE = null;
 let _myPaddleY = 0.5;
+let _pongMode = null; // 'local' | 'remote'
 
-async function showPong() {
+function showPong() {
+  _pongMode = null;
+  document.getElementById('pongModeSelect').style.display = 'flex';
+  document.getElementById('pongGame').style.display = 'none';
   document.getElementById('pongOverlay').classList.add('show');
-  document.getElementById('pongInfo').textContent = 'Verbinde...';
+}
+
+function _showPongGame(mode, infoText) {
+  _pongMode = mode;
+  document.getElementById('pongModeSelect').style.display = 'none';
+  document.getElementById('pongGame').style.display = 'block';
+  document.getElementById('pongScoreL').textContent = '0';
+  document.getElementById('pongScoreR').textContent = '0';
+  document.getElementById('pongInfo').textContent = infoText;
+}
+
+async function startLocalPong() {
+  await fetch('/api/pong/local/start', {method:'POST'}).catch(()=>{});
+  _showPongGame('local', '🟢 Du = linkes Paddle | 🤖 KI = rechts');
+  _pongActive = true;
+  _startPongInput();
+  _startPongRender();
+}
+
+async function challengeHost() {
+  document.getElementById('pongModeSelect').style.display = 'none';
+  document.getElementById('pongGame').style.display = 'block';
+  document.getElementById('pongInfo').textContent = '⏳ Sende Challenge...';
   try {
-    const r = await fetch('/api/host/pong/state');
+    const r = await fetch('/api/host/pong/challenge', {method:'POST'});
     const d = await r.json();
-    if (!d.running) {
-      document.getElementById('pongInfo').textContent = '⏳ Kein aktives Spiel — fordere deinen Freund heraus!';
+    if (!d.ok) {
+      document.getElementById('pongInfo').textContent = '❌ ' + (d.error || 'Fehlgeschlagen');
       return;
     }
   } catch(e) {
     document.getElementById('pongInfo').textContent = '❌ Host nicht erreichbar';
     return;
   }
-  // Admin sagen dass Freund rechts spielt
-  await _adminUrlPromise;  // warten bis ADMIN_URL geladen
+  // Challenge gesendet — jetzt als rechtes Paddle beitreten
+  await _adminUrlPromise;
   await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
+  _showPongGame('remote', '🟠 Du = rechtes Paddle | Warte auf Admin...');
   _pongActive = true;
-  document.getElementById('pongInfo').textContent = '🟠 Du = rechtes Paddle (Maus/Touch)';
   _startPongInput();
   _startPongRender();
 }
-let _pongSSE = null;
+
 function closePong() {
   _pongActive = false;
   if (_pongRAF)  cancelAnimationFrame(_pongRAF);
   if (_pongPoll) clearInterval(_pongPoll);
   if (_pongSSE)  { _pongSSE.close(); _pongSSE = null; }
+  if (_pongMode === 'local') fetch('/api/pong/local/stop', {method:'POST'}).catch(()=>{});
   document.getElementById('pongOverlay').classList.remove('show');
 }
-async function pongReset() { closePong(); await new Promise(r => setTimeout(r, 200)); showPong(); }
 
-async function challengeHost() {
-  try {
-    const r = await fetch('/api/host/pong/challenge', {method:'POST'});
-    const d = await r.json();
-    if (d.ok) addMsg('🏓 Challenge gesendet! Dein Freund wurde benachrichtigt.', 'sys');
-    else addMsg('❌ Challenge fehlgeschlagen: ' + (d.error||''), 'sys');
-  } catch(e) { addMsg('Host nicht erreichbar 😢', 'sys'); }
+async function pongReset() {
+  closePong();
+  await new Promise(r => setTimeout(r, 150));
+  showPong();
 }
 
 async function acceptPongChallenge() {
   document.getElementById('pongChallengeBanner').style.display = 'none';
-  await showPong();
+  await _adminUrlPromise;
+  await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
+  _showPongGame('remote', '🟠 Du = rechtes Paddle (Maus/Touch)');
+  _pongActive = true;
+  _startPongInput();
+  _startPongRender();
 }
 
 // Polling: prüfen ob Admin uns herausfordert
@@ -1159,6 +1198,8 @@ setInterval(async () => {
     const d = await r.json();
     if (d.pending) {
       document.getElementById('pongChallengeBanner').style.display = 'block';
+      document.getElementById('pongModeSelect').style.display = 'none';
+      document.getElementById('pongGame').style.display = 'block';
       document.getElementById('pongOverlay').classList.add('show');
     }
   } catch(e) {}
@@ -1174,7 +1215,13 @@ function _startPongInput() {
   canvas.onmousemove  = updateY;
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
-  const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
+  let _paddleUrl, _side;
+  if (_pongMode === 'local') {
+    _paddleUrl = '/api/pong/local/paddle'; _side = 'left';
+  } else {
+    _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
+    _side = 'right';
+  }
   let _lastSentY = -1;
   _pongPoll = setInterval(() => {
     if (!_pongActive) return;
@@ -1182,7 +1229,7 @@ function _startPongInput() {
     _lastSentY = _myPaddleY;
     fetch(_paddleUrl, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({side: 'right', y: _myPaddleY})
+      body: JSON.stringify({side: _side, y: _myPaddleY})
     }).catch(()=>{});
   }, 50);
 }
@@ -1192,28 +1239,38 @@ function _startPongRender() {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   let state = null;
-  let _fetching = false;
 
-  // SSE-Stream direkt vom Admin — kein Polling, kein Overhead
-  let _sse = null;
-  if (ADMIN_URL) {
-    _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
-    _pongSSE = _sse;
-    _sse.onmessage = e => {
-      try {
-        state = JSON.parse(e.data);
-        if (state.score_l !== undefined) {
-          document.getElementById('pongScoreL').textContent = state.score_l;
-          document.getElementById('pongScoreR').textContent = state.score_r;
-        }
-      } catch(e) {}
-    };
-  } else {
-    // Fallback: polling über Proxy
+  if (_pongMode === 'local') {
+    // Lokales Spiel: polling gegen eigenen Server
     const _statePoll = setInterval(async () => {
       if (!_pongActive) { clearInterval(_statePoll); return; }
-      try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+      try {
+        const s = await (await fetch('/api/pong/local/state')).json();
+        state = s;
+        document.getElementById('pongScoreL').textContent = s.score_l ?? 0;
+        document.getElementById('pongScoreR').textContent = s.score_r ?? 0;
+      } catch(e) {}
     }, 50);
+  } else {
+    // Remote: SSE direkt vom Admin
+    if (ADMIN_URL) {
+      const _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
+      _pongSSE = _sse;
+      _sse.onmessage = e => {
+        try {
+          state = JSON.parse(e.data);
+          if (state.score_l !== undefined) {
+            document.getElementById('pongScoreL').textContent = state.score_l;
+            document.getElementById('pongScoreR').textContent = state.score_r;
+          }
+        } catch(e) {}
+      };
+    } else {
+      const _statePoll = setInterval(async () => {
+        if (!_pongActive) { clearInterval(_statePoll); return; }
+        try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+      }, 50);
+    }
   }
 
   // Render-Loop läuft mit 60fps und nutzt gecachten State
@@ -1225,14 +1282,18 @@ function _startPongRender() {
     ctx.setLineDash([]);
     if (state) {
       const ph = H * 0.15, pw = 12;
-      ctx.fillStyle = '#1e4d43';
+      const isLocal = (_pongMode === 'local');
+      // Linkes Paddle — grün umrandet wenn wir es steuern
+      ctx.fillStyle = isLocal ? '#2b8773' : '#1e4d43';
       _rr(ctx, 8, state.left * H - ph/2, pw, ph, 4);
+      if (isLocal) { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _rr(ctx, 8, state.left*H-ph/2, pw, ph, 4, true); }
+      // Rechtes Paddle — grün umrandet wenn wir es steuern (remote)
       ctx.fillStyle = '#f97316';
       _rr(ctx, W-8-pw, state.right * H - ph/2, pw, ph, 4);
-      ctx.strokeStyle='#4ade80'; ctx.lineWidth=2;
-      _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true);
+      if (!isLocal) { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true); }
+      if (isLocal) { ctx.fillStyle='#475569'; ctx.font='11px monospace'; ctx.fillText('🤖', W-28, 18); }
       // Ball nur wenn Spiel läuft
-      if (state.friend_ready || !state.right_human) {
+      if (isLocal || state.friend_ready || !state.right_human) {
         const bx = state.ball.x * W, by = state.ball.y * H;
         const grd = ctx.createRadialGradient(bx,by,0,bx,by,14);
         grd.addColorStop(0,'rgba(255,255,255,.9)'); grd.addColorStop(1,'rgba(255,255,255,0)');
@@ -1818,6 +1879,102 @@ def admin_pong_paddle():
         allowed = _admin_access
     if not allowed:
         return jsonify(ok=False, error="Zugriff nicht erlaubt."), 403
+    return jsonify(ok=True)
+
+# ── LOKALE PONG-ENGINE (Freund vs KI) ────────────────────────────
+import random as _random
+import math as _math
+_lp_lock = threading.Lock()
+_lp = {
+    'ball': {'x': 0.5, 'y': 0.5, 'vx': 0.014, 'vy': 0.008},
+    'left': 0.5, 'left_prev': 0.5,
+    'right': 0.5, 'right_prev': 0.5,
+    'score_l': 0, 'score_r': 0,
+    'running': False,
+    'countdown_until': 0.0,
+}
+
+def _lp_reset_ball(b, direction):
+    b['x'], b['y'] = 0.5, 0.5
+    b['vx'] = direction * (0.013 + _random.uniform(0, 0.003))
+    b['vy'] = (_random.random() - 0.5) * 0.018
+
+def _lp_step():
+    with _lp_lock:
+        if not _lp['running']: return
+        b = _lp['ball']
+        lv = _lp['left'] - _lp['left_prev']
+        _lp['left_prev'] = _lp['left']
+        # KI rechts
+        t = b['y']; c = _lp['right']
+        _lp['right'] = max(0.08, min(0.92, c + max(-0.024, min(0.024, t - c))))
+        b['x'] += b['vx']; b['y'] += b['vy']
+        if b['y'] <= 0.02: b['y'] = 0.02; b['vy'] = abs(b['vy'])
+        if b['y'] >= 0.98: b['y'] = 0.98; b['vy'] = -abs(b['vy'])
+        ph = 0.15
+        if b['x'] <= 0.04:
+            if abs(b['y'] - _lp['left']) < ph:
+                b['x'] = 0.04; b['vx'] = abs(b['vx']) * 1.06
+                b['vy'] += (b['y'] - _lp['left']) * 0.06 + lv * 1.4
+            elif b['x'] < 0:
+                _lp['score_r'] += 1; _lp_reset_ball(b, 1)
+        if b['x'] >= 0.96:
+            if abs(b['y'] - _lp['right']) < ph:
+                b['x'] = 0.96; b['vx'] = -abs(b['vx']) * 1.06
+                b['vy'] += (b['y'] - _lp['right']) * 0.06
+            elif b['x'] > 1.0:
+                _lp['score_l'] += 1; _lp_reset_ball(b, -1)
+        spd = (b['vx']**2 + b['vy']**2) ** 0.5
+        if spd > 0.030: b['vx'] = b['vx']/spd*0.030; b['vy'] = b['vy']/spd*0.030
+
+def _lp_loop():
+    while _lp['running']:
+        with _lp_lock:
+            cu = _lp['countdown_until']
+        if _time.time() < cu:
+            _time.sleep(0.016); continue
+        _lp_step()
+        _time.sleep(0.016)
+
+@app.route('/api/pong/local/start', methods=['POST'])
+@login_required
+def pong_local_start():
+    with _lp_lock:
+        _lp['score_l'] = 0; _lp['score_r'] = 0
+        _lp['left'] = 0.5; _lp['right'] = 0.5
+        _lp['countdown_until'] = _time.time() + 3
+        _lp_reset_ball(_lp['ball'], 1 if _random.random() > 0.5 else -1)
+        if not _lp['running']:
+            _lp['running'] = True
+            threading.Thread(target=_lp_loop, daemon=True).start()
+    return jsonify(ok=True)
+
+@app.route('/api/pong/local/state')
+@login_required
+def pong_local_state():
+    with _lp_lock:
+        cu = _lp['countdown_until']
+        cd = max(0, _math.ceil(cu - _time.time())) if cu > 0 else 0
+        return jsonify(
+            ball=dict(_lp['ball']), left=_lp['left'], right=_lp['right'],
+            score_l=_lp['score_l'], score_r=_lp['score_r'],
+            running=_lp['running'], countdown=cd, friend_ready=True,
+        )
+
+@app.route('/api/pong/local/paddle', methods=['POST'])
+@login_required
+def pong_local_paddle():
+    data = request.json or {}
+    y = max(0.08, min(0.92, float(data.get('y', 0.5))))
+    with _lp_lock:
+        _lp['left'] = y
+    return jsonify(ok=True)
+
+@app.route('/api/pong/local/stop', methods=['POST'])
+@login_required
+def pong_local_stop():
+    with _lp_lock:
+        _lp['running'] = False
     return jsonify(ok=True)
 
 _pong_pending = False
