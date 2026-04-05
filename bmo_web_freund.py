@@ -1126,10 +1126,12 @@ async function showPong() {
   _startPongInput();
   _startPongRender();
 }
+let _pongSSE = null;
 function closePong() {
   _pongActive = false;
   if (_pongRAF)  cancelAnimationFrame(_pongRAF);
   if (_pongPoll) clearInterval(_pongPoll);
+  if (_pongSSE)  { _pongSSE.close(); _pongSSE = null; }
   document.getElementById('pongOverlay').classList.remove('show');
 }
 async function pongReset() { closePong(); await new Promise(r => setTimeout(r, 200)); showPong(); }
@@ -1190,23 +1192,27 @@ function _startPongRender() {
   let state = null;
   let _fetching = false;
 
-  // State alle 50ms holen — direkt vom Admin wenn möglich
-  const _stateUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/state` : '/api/host/pong/state';
-  async function pollState() {
-    if (!_pongActive) return;
-    if (_fetching) return;
-    _fetching = true;
-    try {
-      const r = await fetch(_stateUrl);
-      state = await r.json();
-      if (state.score_l !== undefined) {
-        document.getElementById('pongScoreL').textContent = state.score_l;
-        document.getElementById('pongScoreR').textContent = state.score_r;
-      }
-    } catch(e) {}
-    _fetching = false;
+  // SSE-Stream direkt vom Admin — kein Polling, kein Overhead
+  let _sse = null;
+  if (ADMIN_URL) {
+    _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
+    _pongSSE = _sse;
+    _sse.onmessage = e => {
+      try {
+        state = JSON.parse(e.data);
+        if (state.score_l !== undefined) {
+          document.getElementById('pongScoreL').textContent = state.score_l;
+          document.getElementById('pongScoreR').textContent = state.score_r;
+        }
+      } catch(e) {}
+    };
+  } else {
+    // Fallback: polling über Proxy
+    const _statePoll = setInterval(async () => {
+      if (!_pongActive) { clearInterval(_statePoll); return; }
+      try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+    }, 50);
   }
-  const _statePoll = setInterval(() => { if (_pongActive) pollState(); else clearInterval(_statePoll); }, 50);
 
   // Render-Loop läuft mit 60fps und nutzt gecachten State
   function loop() {
