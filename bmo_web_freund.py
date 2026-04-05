@@ -752,7 +752,7 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn orange" onclick="confirmShutdown()">
       <span class="icon">⏻</span>Shutdown
     </button>
-    <button class="qbtn" onclick="showHostScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
+    <button class="qbtn" onclick="showMyScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
       <span class="icon">🖥️</span>Host Screen
     </button>
     <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;">
@@ -839,7 +839,7 @@ HTML = """<!DOCTYPE html>
 <div class="overlay screen-overlay" id="hostScreenOverlay">
   <div class="screen-sheet" onclick="event.stopPropagation()">
     <div class="screen-header">
-      <span style="font-weight:600;font-size:15px;color:#38bdf8;">🖥️ Host – Bildschirm Live</span>
+      <span style="font-weight:600;font-size:15px;color:#38bdf8;">🖥️ Mein Bildschirm Live</span>
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="hostScreenStatus" style="font-size:11px;color:#64748b;"></span>
         <button onclick="closeHostScreen()"
@@ -1096,16 +1096,16 @@ async function showCommands() {
   } catch(e) { list.innerHTML = '<p style="color:var(--text2)">Fehler beim Laden.</p>'; }
 }
 
-// ── HOST SCREEN ──────────────────────────────────────────────────
+// ── EIGENER BILDSCHIRM ───────────────────────────────────────────
 let _hostScreenActive = false;
-function showHostScreen() {
+function showMyScreen() {
   _hostScreenActive = true;
   document.getElementById('hostScreenStatus').textContent = 'Verbinde...';
   document.getElementById('hostScreenOverlay').classList.add('show');
   const img = document.getElementById('hostScreenImg');
-  img.src = '/api/host/screen?' + Date.now();
+  img.src = '/api/my/screen?' + Date.now();
   img.onload  = () => { document.getElementById('hostScreenStatus').textContent = 'Live'; };
-  img.onerror = () => { document.getElementById('hostScreenStatus').textContent = '⛔ Kein Zugriff'; img.src = ''; };
+  img.onerror = () => { document.getElementById('hostScreenStatus').textContent = '⛔ Fehler'; img.src = ''; };
 }
 function closeHostScreen() {
   _hostScreenActive = false;
@@ -1157,10 +1157,9 @@ async function challengeHost() {
     document.getElementById('pongInfo').textContent = '❌ Host nicht erreichbar';
     return;
   }
-  // Challenge gesendet — jetzt als rechtes Paddle beitreten
+  // Challenge gesendet — KEIN join() hier, Countdown erst nach Admin-Annahme
   await _adminUrlPromise;
-  await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
-  _showPongGame('remote', '🟠 Du = rechtes Paddle | Warte auf Admin...');
+  _showPongGame('remote', '⏳ Warte auf Admin...');
   _pongActive = true;
   _startPongInput();
   _startPongRender();
@@ -1829,6 +1828,14 @@ def admin_screen():
         return jsonify(error="mss/Pillow nicht installiert: pip install mss Pillow"), 503
     return Response(_screen_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/api/my/screen')
+@login_required
+def my_screen():
+    """Eigener Bildschirm-Stream (nur für eingeloggten Nutzer)."""
+    if not _SCREEN_OK:
+        return jsonify(error="mss/Pillow nicht installiert: pip install mss Pillow"), 503
+    return Response(_screen_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 @app.route('/api/admin/screen/monitors')
 def admin_screen_monitors():
     """Gibt verfügbare Monitore zurück."""
@@ -2254,4 +2261,4 @@ if __name__ == '__main__':
             webbrowser.open(f"http://localhost:{PORT}")
     threading.Thread(target=open_browser, daemon=True).start()
 
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
