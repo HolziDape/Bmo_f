@@ -753,7 +753,7 @@ HTML = """<!DOCTYPE html>
       <span class="icon">⏻</span>Shutdown
     </button>
     <button class="qbtn" onclick="showMyScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
-      <span class="icon">🖥️</span>Host Screen
+      <span class="icon">🖥️</span>Mein Screen
     </button>
     <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;">
       <span class="icon">🏓</span>Pong
@@ -861,20 +861,7 @@ HTML = """<!DOCTYPE html>
       <button onclick="closePong()"
         style="background:none;border:1px solid var(--border);border-radius:8px;color:var(--text2);padding:5px 12px;font-size:13px;cursor:pointer;">✕</button>
     </div>
-    <!-- Mode-Auswahl -->
-    <div id="pongModeSelect" style="display:flex;flex-direction:column;gap:12px;padding:20px 0;">
-      <div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:4px;">Was möchtest du spielen?</div>
-      <button onclick="startLocalPong()"
-        style="padding:16px;background:var(--bg3);border:2px solid #4ade80;border-radius:14px;color:#4ade80;font-size:16px;font-weight:700;cursor:pointer;">
-        🤖 Gegen KI spielen
-      </button>
-      <button onclick="challengeHost()"
-        style="padding:16px;background:var(--bg3);border:2px solid #f97316;border-radius:14px;color:#f97316;font-size:16px;font-weight:700;cursor:pointer;">
-        ⚔️ Admin herausfordern
-      </button>
-    </div>
-    <!-- Spiel -->
-    <div id="pongGame" style="display:none;">
+    <div id="pongGame">
       <div style="display:flex;justify-content:center;gap:24px;margin-bottom:8px;">
         <span id="pongScoreL" style="font-size:36px;font-weight:700;color:#2b8773;">0</span>
         <span style="font-size:36px;color:#475569;">:</span>
@@ -1116,35 +1103,19 @@ function closeHostScreen() {
 // ── PONG ─────────────────────────────────────────────────────────
 let _pongActive = false, _pongRAF = null, _pongPoll = null, _pongSSE = null;
 let _myPaddleY = 0.5;
-let _pongMode = null; // 'local' | 'remote'
 
 function showPong() {
-  _pongMode = null;
-  document.getElementById('pongModeSelect').style.display = 'flex';
-  document.getElementById('pongGame').style.display = 'none';
   document.getElementById('pongOverlay').classList.add('show');
+  challengeHost();
 }
 
-function _showPongGame(mode, infoText) {
-  _pongMode = mode;
-  document.getElementById('pongModeSelect').style.display = 'none';
-  document.getElementById('pongGame').style.display = 'block';
+function _showPongGame(infoText) {
   document.getElementById('pongScoreL').textContent = '0';
   document.getElementById('pongScoreR').textContent = '0';
   document.getElementById('pongInfo').textContent = infoText;
 }
 
-async function startLocalPong() {
-  await fetch('/api/pong/local/start', {method:'POST'}).catch(()=>{});
-  _showPongGame('local', '🟢 Du = linkes Paddle | 🤖 KI = rechts');
-  _pongActive = true;
-  _startPongInput();
-  _startPongRender();
-}
-
 async function challengeHost() {
-  document.getElementById('pongModeSelect').style.display = 'none';
-  document.getElementById('pongGame').style.display = 'block';
   document.getElementById('pongInfo').textContent = '⏳ Sende Challenge...';
   try {
     const r = await fetch('/api/host/pong/challenge', {method:'POST'});
@@ -1159,7 +1130,7 @@ async function challengeHost() {
   }
   // Challenge gesendet — KEIN join() hier, Countdown erst nach Admin-Annahme
   await _adminUrlPromise;
-  _showPongGame('remote', '⏳ Warte auf Admin...');
+  _showPongGame('⏳ Warte auf Admin...');
   _pongActive = true;
   _startPongInput();
   _startPongRender();
@@ -1170,7 +1141,6 @@ function closePong() {
   if (_pongRAF)  cancelAnimationFrame(_pongRAF);
   if (_pongPoll) clearInterval(_pongPoll);
   if (_pongSSE)  { _pongSSE.close(); _pongSSE = null; }
-  if (_pongMode === 'local') fetch('/api/pong/local/stop', {method:'POST'}).catch(()=>{});
   document.getElementById('pongOverlay').classList.remove('show');
 }
 
@@ -1184,7 +1154,7 @@ async function acceptPongChallenge() {
   document.getElementById('pongChallengeBanner').style.display = 'none';
   await _adminUrlPromise;
   await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
-  _showPongGame('remote', '🟠 Du = rechtes Paddle (Maus/Touch)');
+  _showPongGame('🟠 Du = rechtes Paddle (Maus/Touch)');
   _pongActive = true;
   _startPongInput();
   _startPongRender();
@@ -1214,13 +1184,8 @@ function _startPongInput() {
   canvas.onmousemove  = updateY;
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
-  let _paddleUrl, _side;
-  if (_pongMode === 'local') {
-    _paddleUrl = '/api/pong/local/paddle'; _side = 'left';
-  } else {
-    _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
-    _side = 'right';
-  }
+  const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
+  const _side = 'right';
   let _lastSentY = -1;
   _pongPoll = setInterval(() => {
     if (!_pongActive) return;
@@ -1239,37 +1204,23 @@ function _startPongRender() {
   const W = canvas.width, H = canvas.height;
   let state = null;
 
-  if (_pongMode === 'local') {
-    // Lokales Spiel: SSE für 60fps State-Updates
-    const _sse = new EventSource('/api/pong/local/stream');
+  if (ADMIN_URL) {
+    const _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
     _pongSSE = _sse;
     _sse.onmessage = e => {
       try {
         state = JSON.parse(e.data);
-        document.getElementById('pongScoreL').textContent = state.score_l ?? 0;
-        document.getElementById('pongScoreR').textContent = state.score_r ?? 0;
+        if (state.score_l !== undefined) {
+          document.getElementById('pongScoreL').textContent = state.score_l;
+          document.getElementById('pongScoreR').textContent = state.score_r;
+        }
       } catch(e) {}
     };
   } else {
-    // Remote: SSE direkt vom Admin
-    if (ADMIN_URL) {
-      const _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
-      _pongSSE = _sse;
-      _sse.onmessage = e => {
-        try {
-          state = JSON.parse(e.data);
-          if (state.score_l !== undefined) {
-            document.getElementById('pongScoreL').textContent = state.score_l;
-            document.getElementById('pongScoreR').textContent = state.score_r;
-          }
-        } catch(e) {}
-      };
-    } else {
-      const _statePoll = setInterval(async () => {
-        if (!_pongActive) { clearInterval(_statePoll); return; }
-        try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
-      }, 50);
-    }
+    const _statePoll = setInterval(async () => {
+      if (!_pongActive) { clearInterval(_statePoll); return; }
+      try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+    }, 50);
   }
 
   // Render-Loop läuft mit 60fps und nutzt gecachten State
@@ -1281,18 +1232,14 @@ function _startPongRender() {
     ctx.setLineDash([]);
     if (state) {
       const ph = H * 0.15, pw = 12;
-      const isLocal = (_pongMode === 'local');
-      // Linkes Paddle — grün umrandet wenn wir es steuern
-      ctx.fillStyle = isLocal ? '#2b8773' : '#1e4d43';
+      ctx.fillStyle = '#1e4d43';
       _rr(ctx, 8, state.left * H - ph/2, pw, ph, 4);
-      if (isLocal) { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _rr(ctx, 8, state.left*H-ph/2, pw, ph, 4, true); }
-      // Rechtes Paddle — grün umrandet wenn wir es steuern (remote)
       ctx.fillStyle = '#f97316';
       _rr(ctx, W-8-pw, state.right * H - ph/2, pw, ph, 4);
-      if (!isLocal) { ctx.strokeStyle='#4ade80'; ctx.lineWidth=2; _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true); }
-      if (isLocal) { ctx.fillStyle='#475569'; ctx.font='11px monospace'; ctx.fillText('🤖', W-28, 18); }
+      ctx.strokeStyle='#4ade80'; ctx.lineWidth=2;
+      _rr(ctx, W-8-pw, state.right*H-ph/2, pw, ph, 4, true);
       // Ball nur wenn Spiel läuft
-      if (isLocal || state.friend_ready || !state.right_human) {
+      if (state.friend_ready || !state.right_human) {
         const bx = state.ball.x * W, by = state.ball.y * H;
         const grd = ctx.createRadialGradient(bx,by,0,bx,by,14);
         grd.addColorStop(0,'rgba(255,255,255,.9)'); grd.addColorStop(1,'rgba(255,255,255,0)');
@@ -2124,6 +2071,7 @@ def _draw_overlay_thread(monitor=None):
     global _draw_active
     try:
         import tkinter as tk
+        import ctypes
         _draw_active = True
         root = tk.Tk()
         root.overrideredirect(True)
@@ -2140,8 +2088,23 @@ def _draw_overlay_thread(monitor=None):
         root.attributes('-topmost', True)
         root.configure(bg='black')
         root.attributes('-transparentcolor', 'black')
+        root.attributes('-alpha', 0.99)  # DWM-Compositing aktivieren
         cv = tk.Canvas(root, width=sw, height=sh, bg='black', highlightthickness=0)
         cv.pack()
+        # Fenster click-through machen — Nutzer kann normal mit Windows interagieren
+        root.update()
+        try:
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED   = 0x80000
+            WS_EX_TRANSPARENT = 0x20
+            hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            if hwnd == 0:
+                hwnd = root.winfo_id()
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE,
+                                                style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+        except Exception:
+            pass
         _items = []
 
         def _refresh():
