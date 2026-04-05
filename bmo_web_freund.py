@@ -1166,33 +1166,50 @@ function _startPongInput() {
   canvas.onmousemove  = updateY;
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
+  let _lastSentY = -1;
   _pongPoll = setInterval(() => {
     if (!_pongActive) return;
+    if (Math.abs(_myPaddleY - _lastSentY) < 0.005) return;
+    _lastSentY = _myPaddleY;
     fetch('/api/host/pong/paddle', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({side: 'right', y: _myPaddleY})
     }).catch(()=>{});
-  }, 40);
+  }, 50);
 }
 
 function _startPongRender() {
   const canvas = document.getElementById('pongCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  let state = null, frame = 0;
-  async function fetchState() {
-    try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
+  let state = null;
+  let _fetching = false;
+
+  // State alle 50ms holen — unabhängig vom Render-Loop
+  async function pollState() {
+    if (!_pongActive) return;
+    if (_fetching) return;
+    _fetching = true;
+    try {
+      const r = await fetch('/api/host/pong/state');
+      state = await r.json();
+      if (state.score_l !== undefined) {
+        document.getElementById('pongScoreL').textContent = state.score_l;
+        document.getElementById('pongScoreR').textContent = state.score_r;
+      }
+    } catch(e) {}
+    _fetching = false;
   }
+  const _statePoll = setInterval(() => { if (_pongActive) pollState(); else clearInterval(_statePoll); }, 50);
+
+  // Render-Loop läuft mit 60fps und nutzt gecachten State
   function loop() {
     if (!_pongActive) return;
-    if (frame++ % 2 === 0) fetchState();
     ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
     ctx.setLineDash([8,12]); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
     ctx.setLineDash([]);
     if (state) {
-      document.getElementById('pongScoreL').textContent = state.score_l ?? 0;
-      document.getElementById('pongScoreR').textContent = state.score_r ?? 0;
       const ph = H * 0.15, pw = 12;
       ctx.fillStyle = '#1e4d43';
       _rr(ctx, 8, state.left * H - ph/2, pw, ph, 4);
@@ -1208,7 +1225,7 @@ function _startPongRender() {
     }
     _pongRAF = requestAnimationFrame(loop);
   }
-  fetchState(); loop();
+  pollState(); loop();
 }
 function _rr(ctx, x, y, w, h, r, stroke=false) {
   ctx.beginPath();
