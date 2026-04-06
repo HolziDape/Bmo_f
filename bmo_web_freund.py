@@ -164,7 +164,7 @@ if not SPOTIFY_OK:
 # ADMIN-ZUGRIFF STATUS (In-Memory)
 # ══════════════════════════════════════════════════════════════════
 
-_admin_access      = _cfg.get('ADMIN_DEFAULT', 'true').lower() == 'true'    # Freund hat Admin-Zugriff aktiviert
+_admin_access      = _cfg.get('ADMIN_DEFAULT', 'false').lower() == 'true'    # Freund hat Admin-Zugriff aktiviert
 _jumpscare_pending = False   # Admin hat Jumpscare ausgelöst
 _admin_lock        = threading.Lock()
 
@@ -1118,6 +1118,7 @@ function closeHostScreen() {
 
 // ── PONG ─────────────────────────────────────────────────────────
 let _pongActive = false, _pongRAF = null, _pongPoll = null, _pongSSE = null;
+let _pongSocket = null;   // Socket.IO Verbindung zum Host
 let _myPaddleY = 0.5;
 
 async function showPong() {
@@ -1171,6 +1172,7 @@ function closePong() {
   if (_pongRAF)  cancelAnimationFrame(_pongRAF);
   if (_pongPoll) clearInterval(_pongPoll);
   if (_pongSSE)  { _pongSSE.close(); _pongSSE = null; }
+  if (_pongSocket) { _pongSocket.disconnect(); _pongSocket = null; }
   document.getElementById('pongOverlay').classList.remove('show');
 }
 
@@ -1201,21 +1203,42 @@ setInterval(async () => {
   } catch(e) {}
 }, 1000);
 
+// Socket.IO-Client dynamisch vom Host laden (einmalig)
+let _sioLoaded = false, _sioLoadPromise = null;
+function _loadSocketIO() {
+  if (_sioLoaded) return Promise.resolve();
+  if (_sioLoadPromise) return _sioLoadPromise;
+  _sioLoadPromise = new Promise((resolve) => {
+    if (!ADMIN_URL) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = `${ADMIN_URL}/socket.io/socket.io.js`;
+    s.onload = () => { _sioLoaded = true; resolve(); };
+    s.onerror = () => resolve();  // Fallback auf SSE wenn laden fehlschlägt
+    document.head.appendChild(s);
+  });
+  return _sioLoadPromise;
+}
+
 function _startPongInput() {
   const canvas = document.getElementById('pongCanvas');
   const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
   const _side = 'right';
-  let _lastSentY = -1, _sending = false;
+  let _lastSentY = -1;
 
   function maybeSend() {
-    if (!_pongActive || _sending) return;
+    if (!_pongActive) return;
     if (Math.abs(_myPaddleY - _lastSentY) < 0.005) return;
     _lastSentY = _myPaddleY;
-    _sending = true;
-    fetch(_paddleUrl, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({side: _side, y: _myPaddleY})
-    }).catch(()=>{}).finally(() => { _sending = false; });
+    if (_pongSocket && _pongSocket.connected) {
+      _pongSocket.emit('pong_paddle', {side: _side, y: _myPaddleY});
+    } else {
+      // Fallback: HTTP POST (fire-and-forget)
+      fetch(_paddleUrl, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({side: _side, y: _myPaddleY}),
+        keepalive: true
+      }).catch(()=>{});
+    }
   }
 
   function updateY(e) {
@@ -1237,34 +1260,51 @@ function _startPongRender() {
   const W = canvas.width, H = canvas.height;
   let state = null;
 
-  // SSE: direkt zu BMO wenn ADMIN_URL gesetzt, sonst über Proxy
+  function _applyState(s) {
+    state = s;
+    if (s.score_l !== undefined) {
+      document.getElementById('pongScoreL').textContent = s.score_l;
+      document.getElementById('pongScoreR').textContent = s.score_r;
+    }
+    if (s.opponent_left && _pongActive) {
+      _pongActive = false;
+      if (_pongPoll) { clearInterval(_pongPoll); _pongPoll = null; }
+      if (_pongSSE)  { _pongSSE.close(); _pongSSE = null; }
+      document.getElementById('pongInfo').textContent = '⚠️ Admin hat das Spiel verlassen.';
+      setTimeout(() => document.getElementById('pongOverlay').classList.remove('show'), 3000);
+    }
+  }
+
+  // Versuche Socket.IO (WebSocket), sonst SSE-Fallback
+  _loadSocketIO().then(() => {
+    if (_sioLoaded && ADMIN_URL && typeof io !== 'undefined') {
+      // WebSocket-Verbindung zum Host
+      _pongSocket = io(ADMIN_URL, {transports: ['websocket'], reconnection: true});
+      _pongSocket.on('pong_state', _applyState);
+      _pongSocket.on('connect_error', () => {
+        // Socket.IO fehlgeschlagen → SSE-Fallback
+        if (_pongSocket) { _pongSocket.disconnect(); _pongSocket = null; }
+        if (_pongActive) _connectSSE();
+      });
+      document.getElementById('pongInfo').textContent = '🟢 WebSocket verbunden';
+    } else {
+      _connectSSE();
+    }
+  });
+
+  // SSE-Fallback
   const _sseUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/stream` : '/api/host/pong/stream';
   function _connectSSE() {
     const _sse = new EventSource(_sseUrl);
     _pongSSE = _sse;
     _sse.onmessage = e => {
-      try {
-        state = JSON.parse(e.data);
-        if (state.score_l !== undefined) {
-          document.getElementById('pongScoreL').textContent = state.score_l;
-          document.getElementById('pongScoreR').textContent = state.score_r;
-        }
-        // Disconnect-Erkennung: Admin hat das Spiel verlassen
-        if (state.opponent_left && _pongActive) {
-          _pongActive = false;
-          if (_pongPoll) { clearInterval(_pongPoll); _pongPoll = null; }
-          _sse.close(); _pongSSE = null;
-          document.getElementById('pongInfo').textContent = '⚠️ Admin hat das Spiel verlassen.';
-          setTimeout(() => document.getElementById('pongOverlay').classList.remove('show'), 3000);
-        }
-      } catch(_) {}
+      try { _applyState(JSON.parse(e.data)); } catch(_) {}
     };
     _sse.onerror = () => {
       _sse.close();
       if (_pongActive) setTimeout(_connectSSE, 1000);
     };
   }
-  _connectSSE();
 
   // Render-Loop läuft mit 60fps und nutzt gecachten State
   function loop() {
