@@ -1176,26 +1176,32 @@ setInterval(async () => {
 
 function _startPongInput() {
   const canvas = document.getElementById('pongCanvas');
+  const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
+  const _side = 'right';
+  let _lastSentY = -1, _sending = false;
+
+  function maybeSend() {
+    if (!_pongActive || _sending) return;
+    if (Math.abs(_myPaddleY - _lastSentY) < 0.005) return;
+    _lastSentY = _myPaddleY;
+    _sending = true;
+    fetch(_paddleUrl, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({side: _side, y: _myPaddleY})
+    }).catch(()=>{}).finally(() => { _sending = false; });
+  }
+
   function updateY(e) {
     const rect = canvas.getBoundingClientRect();
     const t = e.touches ? e.touches[0] : e;
     _myPaddleY = Math.max(0.08, Math.min(0.92, (t.clientY - rect.top) / rect.height));
+    maybeSend();
   }
   canvas.onmousemove  = updateY;
   canvas.ontouchmove  = e => { e.preventDefault(); updateY(e); };
   canvas.ontouchstart = e => { e.preventDefault(); updateY(e); };
-  const _paddleUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/paddle` : '/api/host/pong/paddle';
-  const _side = 'right';
-  let _lastSentY = -1;
-  _pongPoll = setInterval(() => {
-    if (!_pongActive) return;
-    if (Math.abs(_myPaddleY - _lastSentY) < 0.005) return;
-    _lastSentY = _myPaddleY;
-    fetch(_paddleUrl, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({side: _side, y: _myPaddleY})
-    }).catch(()=>{});
-  }, 50);
+  // Fallback-Interval für verpasste Updates (z.B. Touch-Hold)
+  _pongPoll = setInterval(() => { if (_pongActive) maybeSend(); }, 50);
 }
 
 function _startPongRender() {
@@ -1204,8 +1210,10 @@ function _startPongRender() {
   const W = canvas.width, H = canvas.height;
   let state = null;
 
-  if (ADMIN_URL) {
-    const _sse = new EventSource(`${ADMIN_URL}/api/admin/pong/stream`);
+  // SSE: direkt zu BMO wenn ADMIN_URL gesetzt, sonst über Proxy
+  const _sseUrl = ADMIN_URL ? `${ADMIN_URL}/api/admin/pong/stream` : '/api/host/pong/stream';
+  function _connectSSE() {
+    const _sse = new EventSource(_sseUrl);
     _pongSSE = _sse;
     _sse.onmessage = e => {
       try {
@@ -1214,14 +1222,14 @@ function _startPongRender() {
           document.getElementById('pongScoreL').textContent = state.score_l;
           document.getElementById('pongScoreR').textContent = state.score_r;
         }
-      } catch(e) {}
+      } catch(_) {}
     };
-  } else {
-    const _statePoll = setInterval(async () => {
-      if (!_pongActive) { clearInterval(_statePoll); return; }
-      try { state = await (await fetch('/api/host/pong/state')).json(); } catch(e) {}
-    }, 50);
+    _sse.onerror = () => {
+      _sse.close();
+      if (_pongActive) setTimeout(_connectSSE, 1000);
+    };
   }
+  _connectSSE();
 
   // Render-Loop läuft mit 60fps und nutzt gecachten State
   function loop() {
@@ -1685,6 +1693,26 @@ def host_pong_state():
         return jsonify(**r.json())
     except Exception as e:
         return jsonify(running=False, error=str(e))
+
+@app.route('/api/host/pong/stream')
+@login_required
+def host_pong_stream():
+    """SSE-Proxy: streamt BMO-Pong-State direkt zum Browser ohne Polling."""
+    if not HOST_URL:
+        return jsonify(error="Host-URL nicht konfiguriert."), 503
+    import json as _json
+    def generate():
+        try:
+            with req.get(f"{HOST_URL}/api/admin/pong/stream", stream=True, timeout=60) as r:
+                for line in r.iter_lines():
+                    if line:
+                        yield line.decode('utf-8') + '\n\n'
+        except Exception:
+            pass
+    resp = Response(generate(), mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'
+    return resp
 
 @app.route('/api/host/pong/join', methods=['POST'])
 @login_required
