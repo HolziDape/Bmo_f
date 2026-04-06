@@ -68,7 +68,7 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
-PORT = 5000
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -164,7 +164,7 @@ if not SPOTIFY_OK:
 # ADMIN-ZUGRIFF STATUS (In-Memory)
 # ══════════════════════════════════════════════════════════════════
 
-_admin_access      = False   # Freund hat Admin-Zugriff aktiviert
+_admin_access      = _cfg.get('ADMIN_DEFAULT', 'true').lower() == 'true'    # Freund hat Admin-Zugriff aktiviert
 _jumpscare_pending = False   # Admin hat Jumpscare ausgelöst
 _admin_lock        = threading.Lock()
 
@@ -755,8 +755,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showMyScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
       <span class="icon">🖥️</span>Mein Screen
     </button>
-    <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;">
+    <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;position:relative;">
       <span class="icon">🏓</span>Pong
+      <span id="pongBadge" style="display:none;position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;align-items:center;justify-content:center;animation:pulse .8s infinite;">!</span>
     </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
@@ -942,6 +943,10 @@ HTML = """<!DOCTYPE html>
     <div class="lbl" style="margin-top:14px;">BMO Core IP <span style="color:#555;font-weight:400;">(Tailscale-IP deines Freundes)</span></div>
     <input type="text" id="fSetCoreIp" placeholder="100.x.x.x" autocomplete="off"
       style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:15px;outline:none;box-sizing:border-box;margin-top:6px;">
+    <label style="display:flex;align-items:center;gap:10px;margin-top:16px;cursor:pointer;user-select:none;">
+      <input type="checkbox" id="fSetAdminDefault" style="width:18px;height:18px;accent-color:var(--green);cursor:pointer;">
+      <span style="font-size:14px;color:var(--text);">Admin-Zugriff beim Start automatisch aktivieren</span>
+    </label>
     <div id="fSettingsMsg" style="font-size:13px;color:#5eead4;min-height:18px;margin-top:8px;"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button onclick="closeOverlay('settingsFOverlay')"
@@ -992,6 +997,15 @@ async function updateStatus() {
 updateStatus();
 setInterval(updateStatus, 5000);
 
+// ── ADMIN STATUS BEIM START LADEN ───────────────────────────────
+(async function initAdminUI() {
+  try {
+    const r = await fetch('/api/admin/info');
+    const d = await r.json();
+    _applyAdminUI(d.admin_access);
+  } catch(e) {}
+})();
+
 // ── OVERLAYS ─────────────────────────────────────────────────────
 function showStats()       { updateStatus(); document.getElementById('statsOverlay').classList.add('show'); }
 function confirmShutdown() { document.getElementById('shutdownOverlay').classList.add('show'); }
@@ -1004,6 +1018,7 @@ async function showSettingsF() {
     const r = await fetch('/api/settings');
     const d = await r.json();
     document.getElementById('fSetCoreIp').value = d.core_ip || '';
+    document.getElementById('fSetAdminDefault').checked = !!d.admin_default;
   } catch(e) {}
   document.getElementById('fSetPw').value = '';
   document.getElementById('fSettingsMsg').textContent = '';
@@ -1012,15 +1027,16 @@ async function showSettingsF() {
 }
 
 async function saveSettingsF() {
-  const pw     = document.getElementById('fSetPw').value.trim();
-  const coreIp = document.getElementById('fSetCoreIp').value.trim();
-  const msg    = document.getElementById('fSettingsMsg');
+  const pw           = document.getElementById('fSetPw').value.trim();
+  const coreIp       = document.getElementById('fSetCoreIp').value.trim();
+  const adminDefault = document.getElementById('fSetAdminDefault').checked;
+  const msg          = document.getElementById('fSettingsMsg');
   msg.textContent = 'Speichere...';
   try {
     const r = await fetch('/api/settings', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({password: pw, core_ip: coreIp})
+      body: JSON.stringify({password: pw, core_ip: coreIp, admin_default: adminDefault})
     });
     const d = await r.json();
     if (d.ok) {
@@ -1104,8 +1120,22 @@ function closeHostScreen() {
 let _pongActive = false, _pongRAF = null, _pongPoll = null, _pongSSE = null;
 let _myPaddleY = 0.5;
 
-function showPong() {
+async function showPong() {
   document.getElementById('pongOverlay').classList.add('show');
+  // Prüfen ob Admin uns bereits eingeladen hat
+  try {
+    const r = await fetch('/api/pong/pending');
+    const d = await r.json();
+    if (d.pending) {
+      // Einladung annehmen — Banner zeigen, KEIN Challenge senden
+      document.getElementById('pongBadge').style.display = 'none';
+      document.getElementById('pongChallengeBanner').style.display = 'block';
+      if (document.getElementById('pongModeSelect'))
+        document.getElementById('pongModeSelect').style.display = 'none';
+      document.getElementById('pongGame').style.display = 'block';
+      return;
+    }
+  } catch(e) {}
   challengeHost();
 }
 
@@ -1152,6 +1182,7 @@ async function pongReset() {
 
 async function acceptPongChallenge() {
   document.getElementById('pongChallengeBanner').style.display = 'none';
+  document.getElementById('pongBadge').style.display = 'none';
   await _adminUrlPromise;
   await fetch('/api/host/pong/join', {method:'POST'}).catch(()=>{});
   _showPongGame('🟠 Du = rechtes Paddle (Maus/Touch)');
@@ -1160,19 +1191,15 @@ async function acceptPongChallenge() {
   _startPongRender();
 }
 
-// Polling: prüfen ob Admin uns herausfordert
+// Polling: prüfen ob Admin uns herausfordert — Badge zeigen, Overlay NICHT automatisch öffnen
 setInterval(async () => {
   try {
-    const r = await fetch('/api/pong/pending');
+    const r = await fetch('/api/pong/pending/peek');
     const d = await r.json();
-    if (d.pending) {
-      document.getElementById('pongChallengeBanner').style.display = 'block';
-      document.getElementById('pongModeSelect').style.display = 'none';
-      document.getElementById('pongGame').style.display = 'block';
-      document.getElementById('pongOverlay').classList.add('show');
-    }
+    const badge = document.getElementById('pongBadge');
+    badge.style.display = d.pending ? 'flex' : 'none';
   } catch(e) {}
-}, 5000);
+}, 1000);
 
 function _startPongInput() {
   const canvas = document.getElementById('pongCanvas');
@@ -1221,6 +1248,14 @@ function _startPongRender() {
         if (state.score_l !== undefined) {
           document.getElementById('pongScoreL').textContent = state.score_l;
           document.getElementById('pongScoreR').textContent = state.score_r;
+        }
+        // Disconnect-Erkennung: Admin hat das Spiel verlassen
+        if (state.opponent_left && _pongActive) {
+          _pongActive = false;
+          if (_pongPoll) { clearInterval(_pongPoll); _pongPoll = null; }
+          _sse.close(); _pongSSE = null;
+          document.getElementById('pongInfo').textContent = '⚠️ Admin hat das Spiel verlassen.';
+          setTimeout(() => document.getElementById('pongOverlay').classList.remove('show'), 3000);
         }
       } catch(_) {}
     };
@@ -1574,7 +1609,10 @@ def status():
 @login_required
 def get_settings_f():
     cfg_data = _load_config()
-    return jsonify(core_ip=cfg_data.get('CORE_IP', ''))
+    return jsonify(
+        core_ip=cfg_data.get('CORE_IP', ''),
+        admin_default=cfg_data.get('ADMIN_DEFAULT', 'false').lower() == 'true'
+    )
 
 @app.route('/api/settings', methods=['POST'])
 @login_required
@@ -1596,6 +1634,10 @@ def save_settings_f():
         CORE_URL = f"http://{new_ip}:6000"
         HOST_URL = f"http://{new_ip}:5000"
         changed.append('core_ip')
+    if 'admin_default' in data:
+        val = 'true' if data['admin_default'] else 'false'
+        cfg_data['ADMIN_DEFAULT'] = val
+        changed.append('admin_default')
     _save_config(cfg_data)
     return jsonify(ok=True, changed=changed)
 
@@ -2005,6 +2047,14 @@ def pong_pending():
     with _pong_pending_lock:
         p = _pong_pending
         _pong_pending = False  # einmal abgefragt → zurücksetzen
+    return jsonify(pending=p)
+
+@app.route('/api/pong/pending/peek')
+@login_required
+def pong_pending_peek():
+    """Gibt pending-Status zurück OHNE ihn zu konsumieren."""
+    with _pong_pending_lock:
+        p = _pong_pending
     return jsonify(pending=p)
 
 @app.route('/api/host/pong/challenge', methods=['POST'])
