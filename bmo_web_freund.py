@@ -69,6 +69,9 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
+from bmo_games import games_bp
+app.register_blueprint(games_bp)
+
 PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
@@ -134,6 +137,8 @@ def read_config():
 cfg = read_config()
 _CONFIG_TXT = os.path.join(BASE_DIR, "config.txt")
 _POINTS_SECRET = _bmo_points.ensure_secret(_CONFIG_TXT)
+app.config['CONFIG_TXT']    = _CONFIG_TXT
+app.config['POINTS_SECRET'] = _POINTS_SECRET
 _DATA_DIR = os.path.join(BASE_DIR, "_intern", "data")
 
 # HOST_URL: Web-Interface des Freundes (für Pong/Screen-Proxy)
