@@ -6,8 +6,14 @@ import time
 import secrets
 import threading
 from flask import Blueprint, request, jsonify, render_template_string
+from flask import session as _flask_session, redirect, url_for
 
 games_bp = Blueprint('games', __name__)
+
+
+def _check_auth():
+    """Returns True if user is authenticated (same check as login_required in bmo_web_freund)."""
+    return bool(_flask_session.get('authenticated'))
 
 # Aktive Spiel-Sessions: {token: {'game': str, 'start': float}}
 _sessions: dict = {}
@@ -39,6 +45,8 @@ def _cleanup_sessions():
 
 @games_bp.route('/games/<game>')
 def game_page(game):
+    if not _check_auth():
+        return redirect('/login')
     if game not in MIN_GAME_SECONDS:
         return 'Spiel nicht gefunden', 404
     token = secrets.token_hex(16)
@@ -51,6 +59,8 @@ def game_page(game):
 @games_bp.route('/api/games/complete', methods=['POST'])
 def api_games_complete():
     """Verifiziert Spiel-Ergebnis und gibt neue Punkte zurück."""
+    if not _check_auth():
+        return jsonify(error='Nicht eingeloggt'), 401
     import bmo_points as _bp
     from flask import current_app
 

@@ -178,7 +178,10 @@ if not SPOTIFY_OK:
 def api_points_sync():
     """Empfängt Punkte-Stand vom Browser, verifiziert Signatur, synct mit Admin."""
     data = request.get_json(silent=True) or {}
-    client_points = int(data.get('points', 0))
+    try:
+        client_points = int(data.get('points', 0))
+    except (ValueError, TypeError):
+        return jsonify(error='Ungültiger Punktestand'), 400
     client_sig    = data.get('sig', '')
 
     # Lokale Signatur prüfen
@@ -217,7 +220,10 @@ def api_features_use():
     """Zieht Punkte für ein Feature ab und löst es beim Admin aus."""
     data    = request.get_json(silent=True) or {}
     feature = data.get('feature', '')
-    points  = int(data.get('points', 0))
+    try:
+        points = int(data.get('points', 0))
+    except (ValueError, TypeError):
+        return jsonify(error='Ungültiger Punktestand'), 400
     sig     = data.get('sig', '')
 
     if not _bmo_points.verify(points, sig, _POINTS_SECRET):
