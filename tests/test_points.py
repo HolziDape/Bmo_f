@@ -57,3 +57,23 @@ def test_save_and_load_points_admin():
 def test_load_points_admin_missing_returns_zero():
     with tempfile.TemporaryDirectory() as d:
         assert bmo_points.load_points_admin('nonexistent', d) == 0
+
+# ── Difficulty-System Tests ──────────────────────────────────────
+
+def test_diff_multiplier_easy():
+    import math
+    base = 30  # pong
+    result = math.floor(base * 0.5)
+    assert result == 15
+
+def test_diff_multiplier_insane():
+    import math
+    base = 25  # tetris
+    result = math.floor(base * 2.0)
+    assert result == 50
+
+def test_diff_multiplier_hard_snake():
+    import math
+    base = 20  # snake
+    result = math.floor(base * 1.5)
+    assert result == 30

@@ -2,6 +2,7 @@
 bmo_games.py — Mini-Spiele Blueprint (Pong Solo, Tetris, Snake, Breakout)
 Wird in bmo_web_freund.py registriert.
 """
+import math
 import time
 import secrets
 import threading
@@ -19,19 +20,68 @@ def _check_auth():
 _sessions: dict = {}
 _sessions_lock  = threading.Lock()
 
-# Minimale Spielzeit in Sekunden (Anti-Cheat)
-MIN_GAME_SECONDS = {
-    'pong':     60,
-    'tetris':   60,
-    'snake':    30,
-    'breakout': 20,
-}
-
-GAME_POINTS = {
+# Basis-Punkte pro Spiel (Normal-Schwierigkeit)
+BASE_POINTS = {
     'pong':     30,
     'tetris':   25,
     'snake':    20,
     'breakout': 15,
+}
+
+# Multiplikatoren pro Schwierigkeit
+DIFF_MULTIPLIER = {
+    'easy':   0.5,
+    'normal': 1.0,
+    'hard':   1.5,
+    'insane': 2.0,
+}
+
+# Minimale Spielzeit (Anti-Cheat) pro (Spiel, Schwierigkeit)
+MIN_GAME_SECONDS = {
+    ('pong',     'easy'):   20,
+    ('pong',     'normal'): 30,
+    ('pong',     'hard'):   30,
+    ('pong',     'insane'): 30,
+    ('tetris',   'easy'):   30,
+    ('tetris',   'normal'): 60,
+    ('tetris',   'hard'):   60,
+    ('tetris',   'insane'): 60,
+    ('snake',    'easy'):   20,
+    ('snake',    'normal'): 30,
+    ('snake',    'hard'):   30,
+    ('snake',    'insane'): 30,
+    ('breakout', 'easy'):   15,
+    ('breakout', 'normal'): 20,
+    ('breakout', 'hard'):   20,
+    ('breakout', 'insane'): 20,
+}
+
+# Spiel-spezifische Parameter pro Schwierigkeit (werden als Template-Variablen übergeben)
+DIFF_PARAMS = {
+    'pong': {
+        'easy':   {'speed': 3,   'ai_factor': 0.06},
+        'normal': {'speed': 4,   'ai_factor': 0.10},
+        'hard':   {'speed': 5.5, 'ai_factor': 0.14},
+        'insane': {'speed': 7,   'ai_factor': 0.19},
+    },
+    'tetris': {
+        'easy':   {},
+        'normal': {},
+        'hard':   {},
+        'insane': {},
+    },
+    'snake': {
+        'easy':   {'tick': 200},
+        'normal': {'tick': 150},
+        'hard':   {'tick': 100},
+        'insane': {'tick': 65},
+    },
+    'breakout': {
+        'easy':   {'bvx': 2.5, 'bvy': 3.5},
+        'normal': {'bvx': 3.0, 'bvy': 4.0},
+        'hard':   {'bvx': 4.5, 'bvy': 5.5},
+        'insane': {'bvx': 6.0, 'bvy': 7.0},
+    },
 }
 
 def _cleanup_sessions():
@@ -47,13 +97,18 @@ def _cleanup_sessions():
 def game_page(game):
     if not _check_auth():
         return redirect('/login')
-    if game not in MIN_GAME_SECONDS:
+    if game not in BASE_POINTS:
         return 'Spiel nicht gefunden', 404
+    diff = request.args.get('diff', 'normal')
+    if diff not in DIFF_MULTIPLIER:
+        diff = 'normal'
+    earned = math.floor(BASE_POINTS[game] * DIFF_MULTIPLIER[diff])
     token = secrets.token_hex(16)
     with _sessions_lock:
-        _sessions[token] = {'game': game, 'start': time.time()}
+        _sessions[token] = {'game': game, 'start': time.time(), 'diff': diff, 'earned': earned}
     _cleanup_sessions()
-    return render_template_string(_GAME_PAGES[game], token=token, points=GAME_POINTS[game])
+    params = DIFF_PARAMS[game][diff]
+    return render_template_string(_GAME_PAGES[game], token=token, points=earned, diff=diff, **params)
 
 
 @games_bp.route('/api/games/complete', methods=['POST'])
@@ -77,7 +132,7 @@ def api_games_complete():
         return jsonify(error='Falsches Spiel'), 403
 
     elapsed = time.time() - session['start']
-    min_sec = MIN_GAME_SECONDS.get(game, 30)
+    min_sec = MIN_GAME_SECONDS.get((game, session.get('diff', 'normal')), 30)
     if elapsed < min_sec:
         return jsonify(error=f'Zu schnell ({elapsed:.0f}s < {min_sec}s)'), 403
 
@@ -90,7 +145,7 @@ def api_games_complete():
     if not _bp.verify(current_points, current_sig, secret):
         return jsonify(error='Ungültige Signatur'), 403
 
-    earned     = GAME_POINTS[game]
+    earned     = session['earned']
     new_points = current_points + earned
     new_sig    = _bp.sign(new_points, secret)
 
