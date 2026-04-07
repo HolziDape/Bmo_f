@@ -50,6 +50,7 @@ import requests as req
 import psutil
 import datetime
 import functools
+import bmo_points as _bmo_points
 
 try:
     import mss as _mss_lib
@@ -68,7 +69,7 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
-PORT = 5000
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -131,6 +132,9 @@ def read_config():
     return cfg
 
 cfg = read_config()
+_CONFIG_TXT = os.path.join(BASE_DIR, "config.txt")
+_POINTS_SECRET = _bmo_points.ensure_secret(_CONFIG_TXT)
+_DATA_DIR = os.path.join(BASE_DIR, "_intern", "data")
 
 # HOST_URL: Web-Interface des Freundes (für Pong/Screen-Proxy)
 # Wird aus CORE_URL abgeleitet oder aus config.txt überschrieben.
@@ -158,6 +162,98 @@ SPOTIFY_OK = (
 )
 if not SPOTIFY_OK:
     log.warning("Spotify nicht konfiguriert – Spotify-Funktionen deaktiviert.")
+
+
+# ══════════════════════════════════════════════════════════════════
+# PUNKTE-SYSTEM
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/points/sync', methods=['POST'])
+@login_required
+def api_points_sync():
+    """Empfängt Punkte-Stand vom Browser, verifiziert Signatur, synct mit Admin."""
+    data = request.get_json(silent=True) or {}
+    client_points = int(data.get('points', 0))
+    client_sig    = data.get('sig', '')
+
+    # Lokale Signatur prüfen
+    if not _bmo_points.verify(client_points, client_sig, _POINTS_SECRET):
+        # Manipulation: auf letzten bekannten Admin-Stand zurücksetzen
+        freund_id = _cfg.get('CORE_IP', 'unknown')
+        safe_points = _bmo_points.load_points_admin(freund_id, _DATA_DIR)
+        new_sig = _bmo_points.sign(safe_points, _POINTS_SECRET)
+        return jsonify(points=safe_points, sig=new_sig, reset=True)
+
+    # Punkte auf Admin-PC syncen (falls online)
+    freund_id = _cfg.get('CORE_IP', 'unknown')
+    if CORE_URL:
+        try:
+            r = req.post(
+                f'{CORE_URL}/api/points/verify',
+                json={'points': client_points, 'sig': client_sig, 'freund_id': freund_id},
+                timeout=3
+            )
+            if r.ok:
+                admin_data = r.json()
+                verified = admin_data.get('points', client_points)
+                new_sig = _bmo_points.sign(verified, _POINTS_SECRET)
+                return jsonify(points=verified, sig=new_sig)
+        except Exception:
+            pass  # Admin offline — lokalen Stand behalten
+
+    # Admin offline: lokalen Stand bestätigen
+    new_sig = _bmo_points.sign(client_points, _POINTS_SECRET)
+    return jsonify(points=client_points, sig=new_sig)
+
+
+@app.route('/api/features/use', methods=['POST'])
+@login_required
+def api_features_use():
+    """Zieht Punkte für ein Feature ab und löst es beim Admin aus."""
+    data    = request.get_json(silent=True) or {}
+    feature = data.get('feature', '')
+    points  = int(data.get('points', 0))
+    sig     = data.get('sig', '')
+
+    if not _bmo_points.verify(points, sig, _POINTS_SECRET):
+        return jsonify(error='Ungültige Signatur'), 403
+
+    costs = _bmo_points.get_costs(_CONFIG_TXT)
+    cost  = costs.get(feature)
+    if cost is None:
+        return jsonify(error='Unbekanntes Feature'), 400
+    if points < cost:
+        return jsonify(error='Nicht genug Punkte'), 402
+
+    new_points = points - cost
+    new_sig    = _bmo_points.sign(new_points, _POINTS_SECRET)
+
+    # Feature beim Admin auslösen
+    result = 'ok'
+    if CORE_URL:
+        try:
+            if feature == 'jumpscare':
+                req.post(f'{CORE_URL}/jumpscare', timeout=3)
+            elif feature == 'screen_view':
+                pass  # Screen wird client-seitig geöffnet
+            elif feature == 'screen_draw':
+                req.post(f'{CORE_URL}/api/draw/open', timeout=3)
+        except Exception as e:
+            result = f'Feature-Fehler: {e}'
+
+    # Neuen Stand auf Admin sichern
+    freund_id = _cfg.get('CORE_IP', 'unknown')
+    if CORE_URL:
+        try:
+            req.post(
+                f'{CORE_URL}/api/points/verify',
+                json={'points': new_points, 'sig': new_sig, 'freund_id': freund_id},
+                timeout=3
+            )
+        except Exception:
+            pass
+
+    return jsonify(points=new_points, sig=new_sig, result=result)
 
 
 # ══════════════════════════════════════════════════════════════════
