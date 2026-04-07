@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5001
+PORT = 5000
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
