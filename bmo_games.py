@@ -163,16 +163,21 @@ _PONG_HTML = r"""<!DOCTYPE html>
   canvas{border:2px solid #22c55e;border-radius:4px;touch-action:none;}
   #msg{font-size:18px;margin-top:16px;min-height:24px;color:#4ade80;}
   #info{font-size:14px;color:#64748b;margin-top:8px;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:8px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
-<h2 style="color:#4ade80;margin-bottom:8px;">🏓 BMO Pong Solo</h2>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
+<h2 style="color:#4ade80;margin-bottom:4px;">🏓 BMO Pong Solo</h2>
 <div id="info">Gewinne 10 Runden &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="420" height="260"></canvas>
 <div id="msg">Bereit! Bewege die Maus oder tippe auf den Bildschirm.</div>
 <script>
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
-const W=canvas.width,H=canvas.height,PW=10,PH=60,BALL=8,SPEED=4;
+const W=canvas.width,H=canvas.height,PW=10,PH=60,BALL=8;
+const SPEED={{ speed }}, AI_FACTOR={{ ai_factor }};
 let py=(H-PH)/2,ay=(H-PH)/2,bx=W/2,by=H/2,vx=SPEED,vy=SPEED*(Math.random()>.5?1:-1);
 let wins=0,losses=0,running=true,gameOver=false;
 
@@ -188,8 +193,8 @@ canvas.addEventListener('touchmove',e=>{
 
 function resetBall(dir){
   bx=W/2;by=H/2;
-  vx=(SPEED+wins*0.15)*(dir||1);
-  vy=(SPEED+wins*0.1)*(Math.random()>.5?1:-1);
+  vx=(SPEED+wins*0.1)*(dir||1);
+  vy=(SPEED+wins*0.07)*(Math.random()>.5?1:-1);
 }
 
 function draw(){
@@ -201,17 +206,15 @@ function draw(){
   ctx.fillText(wins,W/4,40);ctx.fillText(losses,3*W/4,40);
   ctx.fillStyle='#64748b';ctx.font='12px sans-serif';
   ctx.fillText('Wins',W/4,58);ctx.fillText('Verloren',3*W/4,58);
-  ctx.fillStyle='#22c55e';ctx.beginPath();
-  ctx.roundRect(4,py,PW,PH,4);ctx.fill();
-  ctx.fillStyle='#ef4444';ctx.beginPath();
-  ctx.roundRect(W-PW-4,ay,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#22c55e';ctx.beginPath();ctx.roundRect(4,py,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.roundRect(W-PW-4,ay,PW,PH,4);ctx.fill();
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
 }
 
 function loop(){
   if(!running)return;
   const aim=by-(PH/2);
-  ay+=(aim-ay)*0.1;
+  ay+=(aim-ay)*AI_FACTOR;
   ay=Math.max(0,Math.min(H-PH,ay));
   bx+=vx;by+=vy;
   if(by-BALL<0){by=BALL;vy*=-1;}
