@@ -826,6 +826,9 @@ HTML = """<!DOCTYPE html>
     75%  { transform: translate( 4px, 4px) rotate( 1deg) scale(0.92); }
     100% { transform: translate(-4px,-4px) rotate(-2deg) scale(1.05); }
   }
+  .shop-btn { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; color:var(--text); font-size:15px; cursor:pointer; transition:background .15s; width:100%; }
+  .shop-btn:active { background:var(--border); }
+  .shop-cost { font-weight:700; color:#4ade80; font-size:14px; }
 </style>
 </head>
 <body>
@@ -835,6 +838,9 @@ HTML = """<!DOCTYPE html>
     <div>
       <h1>BMO</h1>
       <span class="sub" id="coreStatus">Verbinde...</span>
+    </div>
+    <div id="pointsBadge" style="margin-left:auto;background:rgba(34,197,94,0.12);border:1px solid #22c55e;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700;color:#4ade80;cursor:pointer;" onclick="showPointsShop()">
+      &#11088; <span id="pointsVal">0</span>
     </div>
   </header>
 
@@ -1059,6 +1065,58 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+// ── PUNKTE ────────────────────────────────────────────────────────
+let _pts = 0, _ptsSig = '';
+
+function _loadPoints() {
+  try {
+    const d = JSON.parse(localStorage.getItem('bmo_points') || '{}');
+    _pts = d.points || 0; _ptsSig = d.sig || '';
+  } catch(e) { _pts = 0; _ptsSig = ''; }
+  _updatePointsUI();
+}
+
+function _savePoints(p, s) {
+  _pts = p; _ptsSig = s;
+  localStorage.setItem('bmo_points', JSON.stringify({points: p, sig: s}));
+  _updatePointsUI();
+}
+
+function _updatePointsUI() {
+  const v = document.getElementById('pointsVal');
+  const sp = document.getElementById('shopPoints');
+  if (v) v.textContent = _pts;
+  if (sp) sp.textContent = _pts + ' Pkt';
+}
+
+async function syncPoints() {
+  if (!_ptsSig) return;
+  try {
+    const r = await fetch('/api/points/sync', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({points:_pts, sig:_ptsSig})});
+    const d = await r.json();
+    _savePoints(d.points, d.sig);
+  } catch(e) {}
+}
+
+function showPointsShop() {
+  document.getElementById('pointsOverlay').classList.add('show');
+}
+
+async function buyFeature(feature) {
+  const r = await fetch('/api/features/use', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({feature, points:_pts, sig:_ptsSig})});
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  _savePoints(d.points, d.sig);
+  if (feature === 'screen_draw') { closeOverlay('pointsOverlay'); openAdminDraw(); }
+  if (feature === 'screen_view') { closeOverlay('pointsOverlay'); showMyScreen(); }
+}
+
+window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 500); });
+
+// Beim Start
+_loadPoints();
+setTimeout(syncPoints, 2000);
+
 let ADMIN_URL = null;
 let _adminUrlReady = false;
 const _adminUrlPromise = fetch('/api/config').then(r=>r.json()).then(d=>{ ADMIN_URL = d.host_url || null; _adminUrlReady = true; });
@@ -1606,6 +1664,32 @@ micBtn.addEventListener('click', async () => {
 // ── FRESH START ON LOAD ──────────────────────────────────────────
 fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
+
+<!-- PUNKTE-SHOP OVERLAY -->
+<div class="overlay" id="pointsOverlay" onclick="closeOverlay('pointsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">&#11088; Punkte-Shop</h2>
+      <span style="font-size:22px;font-weight:700;color:#4ade80;" id="shopPoints">0 Pkt</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="shop-btn" onclick="buyFeature('jumpscare')" data-cost="50">
+        <span>&#128123; Jumpscare beim Admin</span><span class="shop-cost" id="cost_jumpscare">50 &#11088;</span>
+      </button>
+      <button class="shop-btn" onclick="buyFeature('screen_view')" data-cost="30">
+        <span>&#128421;&#65039; Admin-Screen ansehen</span><span class="shop-cost" id="cost_screen_view">30 &#11088;</span>
+      </button>
+      <button class="shop-btn" onclick="buyFeature('screen_draw')" data-cost="40">
+        <span>&#127912; Auf Admin-Screen malen</span><span class="shop-cost" id="cost_screen_draw">40 &#11088;</span>
+      </button>
+    </div>
+    <div style="margin-top:16px;font-size:12px;color:var(--text2);text-align:center;">
+      Spiele Spiele um Punkte zu verdienen!
+    </div>
+  </div>
+</div>
+
 </body>
 </html>"""
 
