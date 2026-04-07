@@ -1,0 +1,473 @@
+"""
+bmo_games.py — Mini-Spiele Blueprint (Pong Solo, Tetris, Snake, Breakout)
+Wird in bmo_web_freund.py registriert.
+"""
+import time
+import secrets
+import threading
+from flask import Blueprint, request, jsonify, render_template_string
+from flask import session as _flask_session, redirect, url_for
+
+games_bp = Blueprint('games', __name__)
+
+
+def _check_auth():
+    """Returns True if user is authenticated (same check as login_required in bmo_web_freund)."""
+    return bool(_flask_session.get('authenticated'))
+
+# Aktive Spiel-Sessions: {token: {'game': str, 'start': float}}
+_sessions: dict = {}
+_sessions_lock  = threading.Lock()
+
+# Minimale Spielzeit in Sekunden (Anti-Cheat)
+MIN_GAME_SECONDS = {
+    'pong':     60,
+    'tetris':   60,
+    'snake':    30,
+    'breakout': 20,
+}
+
+GAME_POINTS = {
+    'pong':     30,
+    'tetris':   25,
+    'snake':    20,
+    'breakout': 15,
+}
+
+def _cleanup_sessions():
+    """Entfernt Sessions die älter als 2 Stunden sind."""
+    cutoff = time.time() - 7200
+    with _sessions_lock:
+        expired = [t for t, s in _sessions.items() if s['start'] < cutoff]
+        for t in expired:
+            del _sessions[t]
+
+
+@games_bp.route('/games/<game>')
+def game_page(game):
+    if not _check_auth():
+        return redirect('/login')
+    if game not in MIN_GAME_SECONDS:
+        return 'Spiel nicht gefunden', 404
+    token = secrets.token_hex(16)
+    with _sessions_lock:
+        _sessions[token] = {'game': game, 'start': time.time()}
+    _cleanup_sessions()
+    return render_template_string(_GAME_PAGES[game], token=token, points=GAME_POINTS[game])
+
+
+@games_bp.route('/api/games/complete', methods=['POST'])
+def api_games_complete():
+    """Verifiziert Spiel-Ergebnis und gibt neue Punkte zurück."""
+    if not _check_auth():
+        return jsonify(error='Nicht eingeloggt'), 401
+    import bmo_points as _bp
+    from flask import current_app
+
+    data  = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    game  = data.get('game', '')
+
+    with _sessions_lock:
+        session = _sessions.pop(token, None)
+
+    if not session:
+        return jsonify(error='Ungültige Session'), 403
+    if session['game'] != game:
+        return jsonify(error='Falsches Spiel'), 403
+
+    elapsed = time.time() - session['start']
+    min_sec = MIN_GAME_SECONDS.get(game, 30)
+    if elapsed < min_sec:
+        return jsonify(error=f'Zu schnell ({elapsed:.0f}s < {min_sec}s)'), 403
+
+    current_points = int(data.get('points', 0))
+    current_sig    = data.get('sig', '')
+
+    config_path = current_app.config.get('CONFIG_TXT', 'config.txt')
+    secret      = current_app.config.get('POINTS_SECRET', '')
+
+    if not _bp.verify(current_points, current_sig, secret):
+        return jsonify(error='Ungültige Signatur'), 403
+
+    earned     = GAME_POINTS[game]
+    new_points = current_points + earned
+    new_sig    = _bp.sign(new_points, secret)
+
+    return jsonify(points=new_points, sig=new_sig, earned=earned)
+
+
+# Game HTML pages — filled in Tasks 6-9
+_PONG_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO Pong</title>
+<style>
+  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
+  canvas{border:2px solid #22c55e;border-radius:4px;touch-action:none;}
+  #msg{font-size:18px;margin-top:16px;min-height:24px;color:#4ade80;}
+  #info{font-size:14px;color:#64748b;margin-top:8px;}
+</style>
+</head>
+<body>
+<h2 style="color:#4ade80;margin-bottom:8px;">🏓 BMO Pong Solo</h2>
+<div id="info">Gewinne 10 Runden &rarr; +{{ points }} &#11088;</div>
+<canvas id="c" width="420" height="260"></canvas>
+<div id="msg">Bereit! Bewege die Maus oder tippe auf den Bildschirm.</div>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=canvas.width,H=canvas.height,PW=10,PH=60,BALL=8,SPEED=4;
+let py=(H-PH)/2,ay=(H-PH)/2,bx=W/2,by=H/2,vx=SPEED,vy=SPEED*(Math.random()>.5?1:-1);
+let wins=0,losses=0,running=true,gameOver=false;
+
+canvas.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect();
+  py=Math.min(H-PH,Math.max(0,e.clientY-r.top-PH/2));
+});
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  py=Math.min(H-PH,Math.max(0,e.touches[0].clientY-r.top-PH/2));
+},{passive:false});
+
+function resetBall(dir){
+  bx=W/2;by=H/2;
+  vx=(SPEED+wins*0.15)*(dir||1);
+  vy=(SPEED+wins*0.1)*(Math.random()>.5?1:-1);
+}
+
+function draw(){
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,W,H);
+  ctx.setLineDash([8,8]);ctx.strokeStyle='#1e293b';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#334155';ctx.font='bold 32px sans-serif';ctx.textAlign='center';
+  ctx.fillText(wins,W/4,40);ctx.fillText(losses,3*W/4,40);
+  ctx.fillStyle='#64748b';ctx.font='12px sans-serif';
+  ctx.fillText('Wins',W/4,58);ctx.fillText('Verloren',3*W/4,58);
+  ctx.fillStyle='#22c55e';ctx.beginPath();
+  ctx.roundRect(4,py,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#ef4444';ctx.beginPath();
+  ctx.roundRect(W-PW-4,ay,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
+}
+
+function loop(){
+  if(!running)return;
+  const aim=by-(PH/2);
+  ay+=(aim-ay)*0.1;
+  ay=Math.max(0,Math.min(H-PH,ay));
+  bx+=vx;by+=vy;
+  if(by-BALL<0){by=BALL;vy*=-1;}
+  if(by+BALL>H){by=H-BALL;vy*=-1;}
+  if(bx-BALL<PW+4&&by>py&&by<py+PH){bx=PW+4+BALL;vx=Math.abs(vx)*(1+0.05*wins);vy+=(by-(py+PH/2))*0.1;}
+  if(bx+BALL>W-PW-4&&by>ay&&by<ay+PH){bx=W-PW-4-BALL;vx=-Math.abs(vx)*(1+0.05*wins);}
+  if(bx<0){losses++;document.getElementById('msg').textContent='Verloren! '+wins+'/10 Wins';resetBall(1);}
+  if(bx>W){wins++;document.getElementById('msg').textContent=wins<10?'Gewonnen! '+wins+'/10 Wins':' ';resetBall(-1);}
+  draw();
+  if(wins>=10&&!gameOver){gameOver=true;running=false;finish();}
+  else requestAnimationFrame(loop);
+}
+
+async function finish(){
+  document.getElementById('msg').textContent='10 Wins! Punkte werden gutgeschrieben...';
+  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
+  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'{{ token }}',game:'pong',points:stored.points||0,sig:stored.sig||''})});
+  const d=await r.json();
+  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
+  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
+  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte! Fenster schlie\xDFen.';
+}
+
+resetBall();loop();
+</script>
+</body>
+</html>"""
+
+_TETRIS_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO Tetris</title>
+<style>
+  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
+  canvas{border:2px solid #a855f7;border-radius:4px;}
+  #msg{font-size:16px;margin-top:12px;min-height:20px;color:#c084fc;}
+  .ctrl{display:flex;gap:8px;margin-top:12px;}
+  .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:18px;cursor:pointer;}
+</style>
+</head>
+<body>
+<h2 style="color:#c084fc;margin-bottom:4px;">&#129689; BMO Tetris</h2>
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">Level 5 erreichen &rarr; +{{ points }} &#11088;</div>
+<canvas id="c" width="200" height="400"></canvas>
+<div id="msg">&#8592; &#8594; bewegen | &#8593; drehen | &#8595; fallen</div>
+<div class="ctrl">
+  <button ontouchstart="move(-1)">&#9664;</button>
+  <button ontouchstart="rotate()">&#128260;</button>
+  <button ontouchstart="move(1)">&#9654;</button>
+  <button ontouchstart="drop()">&#9660;</button>
+</div>
+<script>
+const COLS=10,ROWS=20,SZ=20;
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const PIECES=[
+  {s:[[1,1,1,1]],c:'#22d3ee'},
+  {s:[[1,0],[1,0],[1,1]],c:'#f97316'},
+  {s:[[0,1],[0,1],[1,1]],c:'#3b82f6'},
+  {s:[[1,1],[1,1]],c:'#facc15'},
+  {s:[[0,1,1],[1,1,0]],c:'#22c55e'},
+  {s:[[1,1,0],[0,1,1]],c:'#ef4444'},
+  {s:[[1,1,1],[0,1,0]],c:'#a855f7'},
+];
+let board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+let cur,cx,cy,score=0,level=1,lines=0,gameOver=false,done=false;
+
+function newPiece(){
+  const p=PIECES[Math.floor(Math.random()*PIECES.length)];
+  cur={s:p.s.map(r=>[...r]),c:p.c};
+  cx=Math.floor((COLS-cur.s[0].length)/2);cy=0;
+  if(!fits(cur.s,cx,cy)){gameOver=true;document.getElementById('msg').textContent='Game Over!';}
+}
+
+function fits(s,x,y){
+  for(let r=0;r<s.length;r++)for(let c=0;c<s[r].length;c++)
+    if(s[r][c]&&(y+r>=ROWS||x+c<0||x+c>=COLS||board[y+r][x+c]))return false;
+  return true;
+}
+
+function place(){
+  cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{if(v)board[cy+ri][cx+ci]=cur.c;}));
+  let cleared=0;
+  board=board.filter(r=>{if(r.every(c=>c)){cleared++;return false;}return true;});
+  while(board.length<ROWS)board.unshift(Array(COLS).fill(0));
+  lines+=cleared;score+=cleared*100;
+  level=Math.floor(lines/10)+1;
+  document.getElementById('msg').textContent='Level '+level+' | Zeilen '+lines+' | Score '+score;
+  if(level>=5&&!done){done=true;finish();return;}
+  newPiece();
+}
+
+function move(d){if(!gameOver&&!done&&fits(cur.s,cx+d,cy))cx+=d;}
+function drop(){if(!gameOver&&!done&&fits(cur.s,cx,cy+1))cy++;else if(!gameOver&&!done)place();}
+function rotate(){
+  if(gameOver||done)return;
+  const r=cur.s[0].map((_,i)=>cur.s.map(row=>row[i]).reverse());
+  if(fits(r,cx,cy))cur.s=r;
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft')move(-1);
+  if(e.key==='ArrowRight')move(1);
+  if(e.key==='ArrowDown')drop();
+  if(e.key==='ArrowUp')rotate();
+});
+
+function draw(){
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,200,400);
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const v=board[r][c];
+    ctx.fillStyle=v||'#0f172a';
+    ctx.fillRect(c*SZ,r*SZ,SZ-1,SZ-1);
+  }
+  if(cur)cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
+    if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(cy+ri)*SZ,SZ-1,SZ-1);}
+  }));
+}
+
+let last=0;
+function loop(ts){
+  if(gameOver||done)return;
+  if(ts-last>Math.max(100,600-level*50)){last=ts;drop();}
+  draw();requestAnimationFrame(loop);
+}
+
+async function finish(){
+  document.getElementById('msg').textContent='Level 5! Punkte werden gutgeschrieben...';
+  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
+  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'{{ token }}',game:'tetris',points:stored.points||0,sig:stored.sig||''})});
+  const d=await r.json();
+  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
+  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
+  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte!';
+}
+
+newPiece();
+document.getElementById('msg').textContent='Level '+level+' | Zeilen '+lines+' | Score '+score;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>"""
+
+_SNAKE_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO Snake</title>
+<style>
+  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
+  canvas{border:2px solid #22c55e;border-radius:4px;}
+  #msg{font-size:16px;margin-top:12px;min-height:20px;color:#4ade80;}
+  .ctrl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px;width:150px;}
+  .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:12px;border-radius:10px;font-size:18px;cursor:pointer;}
+</style>
+</head>
+<body>
+<h2 style="color:#4ade80;margin-bottom:4px;">&#128013; BMO Snake</h2>
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">20 &#196;pfel essen &rarr; +{{ points }} &#11088;</div>
+<canvas id="c" width="300" height="300"></canvas>
+<div id="msg">WASD oder Pfeiltasten</div>
+<div class="ctrl">
+  <div></div><button ontouchstart="setDir(0,-1)">&#9650;</button><div></div>
+  <button ontouchstart="setDir(-1,0)">&#9664;</button>
+  <button ontouchstart="setDir(0,1)">&#9660;</button>
+  <button ontouchstart="setDir(1,0)">&#9654;</button>
+</div>
+<script>
+const SZ=20,COLS=15,ROWS=15;
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+let snake=[{x:7,y:7}],dir={x:1,y:0},nextDir={x:1,y:0};
+let apple={x:3,y:3},eaten=0,dead=false,done=false;
+
+function randApple(){
+  let a;
+  do{a={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};}
+  while(snake.some(s=>s.x===a.x&&s.y===a.y));
+  apple=a;
+}
+
+function setDir(x,y){if(snake.length>1&&x===-dir.x&&y===-dir.y)return;nextDir={x,y};}
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')setDir(-1,0);
+  if(e.key==='ArrowRight'||e.key==='d')setDir(1,0);
+  if(e.key==='ArrowUp'||e.key==='w')setDir(0,-1);
+  if(e.key==='ArrowDown'||e.key==='s')setDir(0,1);
+});
+
+function step(){
+  if(dead||done)return;
+  dir=nextDir;
+  const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+  if(head.x<0||head.x>=COLS||head.y<0||head.y>=ROWS||snake.some(s=>s.x===head.x&&s.y===head.y)){
+    dead=true;document.getElementById('msg').textContent='Kollision! Seite neu laden zum Weiterspielen.';return;
+  }
+  snake.unshift(head);
+  if(head.x===apple.x&&head.y===apple.y){
+    eaten++;document.getElementById('msg').textContent=eaten+'/20 \u00C4pfel';
+    randApple();
+    if(eaten>=20){done=true;finish();}
+  } else {
+    snake.pop();
+  }
+}
+
+function draw(){
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,300,300);
+  ctx.fillStyle='#ef4444';ctx.fillRect(apple.x*SZ+2,apple.y*SZ+2,SZ-4,SZ-4);
+  snake.forEach((s,i)=>{
+    ctx.fillStyle=i===0?'#4ade80':'#22c55e';
+    ctx.fillRect(s.x*SZ+1,s.y*SZ+1,SZ-2,SZ-2);
+  });
+}
+
+async function finish(){
+  document.getElementById('msg').textContent='20 \u00C4pfel! Punkte werden gutgeschrieben...';
+  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
+  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'{{ token }}',game:'snake',points:stored.points||0,sig:stored.sig||''})});
+  const d=await r.json();
+  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
+  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
+  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte!';
+}
+
+randApple();
+setInterval(()=>{step();draw();},150);
+</script>
+</body>
+</html>"""
+
+_BREAKOUT_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO Breakout</title>
+<style>
+  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
+  canvas{border:2px solid #38bdf8;border-radius:4px;touch-action:none;}
+  #msg{font-size:16px;margin-top:12px;min-height:20px;color:#38bdf8;}
+</style>
+</head>
+<body>
+<h2 style="color:#38bdf8;margin-bottom:4px;">&#129522; BMO Breakout</h2>
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">Alle Steine zerst&#246;ren &rarr; +{{ points }} &#11088;</div>
+<canvas id="c" width="400" height="300"></canvas>
+<div id="msg">Maus/Touch bewegt Paddle</div>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=400,H=300,PW=70,PH=10,BALL=7,BROWS=4,BCOLS=8;
+const BCOLORS=['#ef4444','#f97316','#facc15','#22c55e'];
+let px=(W-PW)/2,bx=W/2,by=H-40,vx=3,vy=-4;
+let bricks=[],lives=3,done=false;
+
+for(let r=0;r<BROWS;r++)for(let c=0;c<BCOLS;c++)
+  bricks.push({x:c*48+8,y:r*22+30,w:44,h:18,alive:true,c:BCOLORS[r]});
+
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.clientX-r.left-PW/2));});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.touches[0].clientX-r.left-PW/2));},{passive:false});
+
+function draw(){
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,W,H);
+  bricks.forEach(b=>{if(!b.alive)return;ctx.fillStyle=b.c;ctx.beginPath();ctx.roundRect(b.x,b.y,b.w,b.h,3);ctx.fill();});
+  ctx.fillStyle='#38bdf8';ctx.beginPath();ctx.roundRect(px,H-PH-5,PW,PH,5);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#ef4444';ctx.font='14px sans-serif';ctx.textAlign='left';
+  ctx.fillText('\u2764\uFE0F'.repeat(lives),8,16);
+}
+
+function loop(){
+  if(done)return;
+  bx+=vx;by+=vy;
+  if(bx-BALL<0){bx=BALL;vx*=-1;}
+  if(bx+BALL>W){bx=W-BALL;vx*=-1;}
+  if(by-BALL<0){by=BALL;vy*=-1;}
+  if(by+BALL>H-PH-5&&bx>px&&bx<px+PW&&vy>0){
+    vy*=-1;vx+=(bx-(px+PW/2))*0.05;
+  }
+  if(by>H){
+    lives--;
+    if(lives<=0){document.getElementById('msg').textContent='Game Over! Seite neu laden.';return;}
+    bx=W/2;by=H-40;vx=3;vy=-4;
+  }
+  bricks.forEach(b=>{
+    if(!b.alive)return;
+    if(bx+BALL>b.x&&bx-BALL<b.x+b.w&&by+BALL>b.y&&by-BALL<b.y+b.h){
+      b.alive=false;vy*=-1;
+    }
+  });
+  const alive=bricks.filter(b=>b.alive).length;
+  if(alive===0&&!done){done=true;finish();return;}
+  draw();requestAnimationFrame(loop);
+}
+
+async function finish(){
+  document.getElementById('msg').textContent='Alle Steine! Punkte werden gutgeschrieben...';
+  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
+  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'{{ token }}',game:'breakout',points:stored.points||0,sig:stored.sig||''})});
+  const d=await r.json();
+  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
+  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
+  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte!';
+}
+
+draw();requestAnimationFrame(loop);
+</script>
+</body>
+</html>"""
+
+_GAME_PAGES: dict = {
+    'pong':     _PONG_HTML,
+    'tetris':   _TETRIS_HTML,
+    'snake':    _SNAKE_HTML,
+    'breakout': _BREAKOUT_HTML,
+}

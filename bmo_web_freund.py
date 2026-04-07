@@ -50,6 +50,7 @@ import requests as req
 import psutil
 import datetime
 import functools
+import bmo_points as _bmo_points
 
 try:
     import mss as _mss_lib
@@ -68,7 +69,10 @@ except ImportError:
 app  = Flask(__name__)
 CORS(app)
 
-PORT = 5000
+from bmo_games import games_bp
+app.register_blueprint(games_bp)
+
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -131,6 +135,11 @@ def read_config():
     return cfg
 
 cfg = read_config()
+_CONFIG_TXT = os.path.join(BASE_DIR, "config.txt")
+_POINTS_SECRET = _bmo_points.ensure_secret(_CONFIG_TXT)
+app.config['CONFIG_TXT']    = _CONFIG_TXT
+app.config['POINTS_SECRET'] = _POINTS_SECRET
+_DATA_DIR = os.path.join(BASE_DIR, "_intern", "data")
 
 # HOST_URL: Web-Interface des Freundes (für Pong/Screen-Proxy)
 # Wird aus CORE_URL abgeleitet oder aus config.txt überschrieben.
@@ -158,6 +167,142 @@ SPOTIFY_OK = (
 )
 if not SPOTIFY_OK:
     log.warning("Spotify nicht konfiguriert – Spotify-Funktionen deaktiviert.")
+
+
+# ══════════════════════════════════════════════════════════════════
+# PUNKTE-SYSTEM
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/points/sync', methods=['POST'])
+@login_required
+def api_points_sync():
+    """Empfängt Punkte-Stand vom Browser, verifiziert Signatur, synct mit Admin."""
+    data = request.get_json(silent=True) or {}
+    try:
+        client_points = int(data.get('points', 0))
+    except (ValueError, TypeError):
+        return jsonify(error='Ungültiger Punktestand'), 400
+    client_sig    = data.get('sig', '')
+
+    # Lokale Signatur prüfen
+    if not _bmo_points.verify(client_points, client_sig, _POINTS_SECRET):
+        # Manipulation: auf letzten bekannten Admin-Stand zurücksetzen
+        freund_id = _cfg.get('CORE_IP', 'unknown')
+        safe_points = _bmo_points.load_points_admin(freund_id, _DATA_DIR)
+        new_sig = _bmo_points.sign(safe_points, _POINTS_SECRET)
+        return jsonify(points=safe_points, sig=new_sig, reset=True)
+
+    # Punkte auf Admin-PC syncen (falls online)
+    freund_id = _cfg.get('CORE_IP', 'unknown')
+    if CORE_URL:
+        try:
+            r = req.post(
+                f'{CORE_URL}/api/points/verify',
+                json={'points': client_points, 'sig': client_sig, 'freund_id': freund_id},
+                timeout=3
+            )
+            if r.ok:
+                admin_data = r.json()
+                verified = admin_data.get('points', client_points)
+                new_sig = _bmo_points.sign(verified, _POINTS_SECRET)
+                return jsonify(points=verified, sig=new_sig)
+        except Exception:
+            pass  # Admin offline — lokalen Stand behalten
+
+    # Admin offline: lokalen Stand bestätigen
+    new_sig = _bmo_points.sign(client_points, _POINTS_SECRET)
+    return jsonify(points=client_points, sig=new_sig)
+
+
+@app.route('/api/features/use', methods=['POST'])
+@login_required
+def api_features_use():
+    """Zieht Punkte für ein Feature ab und löst es beim Admin aus."""
+    data    = request.get_json(silent=True) or {}
+    feature = data.get('feature', '')
+    try:
+        points = int(data.get('points', 0))
+    except (ValueError, TypeError):
+        return jsonify(error='Ungültiger Punktestand'), 400
+    sig     = data.get('sig', '')
+
+    if not _bmo_points.verify(points, sig, _POINTS_SECRET):
+        return jsonify(error='Ungültige Signatur'), 403
+
+    costs = _bmo_points.get_costs(_CONFIG_TXT)
+    cost  = costs.get(feature)
+    if cost is None:
+        return jsonify(error='Unbekanntes Feature'), 400
+    if points < cost:
+        return jsonify(error='Nicht genug Punkte'), 402
+
+    new_points = points - cost
+    new_sig    = _bmo_points.sign(new_points, _POINTS_SECRET)
+
+    # Feature beim Admin auslösen
+    result = 'ok'
+    if CORE_URL:
+        try:
+            if feature == 'jumpscare':
+                req.post(f'{CORE_URL}/jumpscare', timeout=3)
+            elif feature == 'screen_view':
+                pass  # Screen wird client-seitig geöffnet
+            elif feature == 'screen_draw':
+                req.post(f'{CORE_URL}/api/draw/open', timeout=3)
+        except Exception as e:
+            result = f'Feature-Fehler: {e}'
+
+    # Neuen Stand auf Admin sichern
+    freund_id = _cfg.get('CORE_IP', 'unknown')
+    if CORE_URL:
+        try:
+            req.post(
+                f'{CORE_URL}/api/points/verify',
+                json={'points': new_points, 'sig': new_sig, 'freund_id': freund_id},
+                timeout=3
+            )
+        except Exception:
+            pass
+
+    return jsonify(points=new_points, sig=new_sig, result=result)
+
+
+# ── DRAW RELAY ROUTES ──────────────────────────────────────────────
+
+@app.route('/api/draw/stroke-relay', methods=['POST'])
+@login_required
+def api_draw_stroke_relay():
+    """Leitet Strich-Daten vom Browser an Admin-Core weiter."""
+    data = request.get_json(silent=True) or {}
+    if CORE_URL:
+        try:
+            req.post(f'{CORE_URL}/api/draw/stroke', json=data, timeout=1)
+        except Exception:
+            pass
+    return jsonify(ok=True)
+
+@app.route('/api/draw/friend-strokes', methods=['GET'])
+@login_required
+def api_draw_friend_strokes():
+    """Pollt Admin-Striche für den Freund-Browser."""
+    if not CORE_URL:
+        return jsonify(strokes=[])
+    try:
+        r = req.get(f'{CORE_URL}/api/draw/strokes', timeout=2)
+        return jsonify(strokes=r.json().get('strokes', []))
+    except Exception:
+        return jsonify(strokes=[])
+
+@app.route('/api/draw/close-relay', methods=['POST'])
+@login_required
+def api_draw_close_relay():
+    """Schließt Draw-Session auf Admin-Core."""
+    if CORE_URL:
+        try:
+            req.post(f'{CORE_URL}/api/draw/close', timeout=2)
+        except Exception:
+            pass
+    return jsonify(ok=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -730,6 +875,9 @@ HTML = """<!DOCTYPE html>
     75%  { transform: translate( 4px, 4px) rotate( 1deg) scale(0.92); }
     100% { transform: translate(-4px,-4px) rotate(-2deg) scale(1.05); }
   }
+  .shop-btn { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; color:var(--text); font-size:15px; cursor:pointer; transition:background .15s; width:100%; }
+  .shop-btn:active { background:var(--border); }
+  .shop-cost { font-weight:700; color:#4ade80; font-size:14px; }
 </style>
 </head>
 <body>
@@ -739,6 +887,9 @@ HTML = """<!DOCTYPE html>
     <div>
       <h1>BMO</h1>
       <span class="sub" id="coreStatus">Verbinde...</span>
+    </div>
+    <div id="pointsBadge" style="margin-left:auto;background:rgba(34,197,94,0.12);border:1px solid #22c55e;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700;color:#4ade80;cursor:pointer;" onclick="showPointsShop()">
+      &#11088; <span id="pointsVal">0</span>
     </div>
   </header>
 
@@ -758,6 +909,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;position:relative;">
       <span class="icon">🏓</span>Pong
       <span id="pongBadge" style="display:none;position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;align-items:center;justify-content:center;animation:pulse .8s infinite;">!</span>
+    </button>
+    <button class="qbtn" onclick="document.getElementById('gamesOverlay').classList.add('show')" style="border-color:#f59e0b;color:#fbbf24;">
+      <span class="icon">🎮</span>Spiele
     </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
@@ -963,6 +1117,163 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+// ── PUNKTE ────────────────────────────────────────────────────────
+let _pts = 0, _ptsSig = '';
+
+function _loadPoints() {
+  try {
+    const d = JSON.parse(localStorage.getItem('bmo_points') || '{}');
+    _pts = d.points || 0; _ptsSig = d.sig || '';
+  } catch(e) { _pts = 0; _ptsSig = ''; }
+  _updatePointsUI();
+}
+
+function _savePoints(p, s) {
+  _pts = p; _ptsSig = s;
+  localStorage.setItem('bmo_points', JSON.stringify({points: p, sig: s}));
+  _updatePointsUI();
+}
+
+function _updatePointsUI() {
+  const v = document.getElementById('pointsVal');
+  const sp = document.getElementById('shopPoints');
+  if (v) v.textContent = _pts;
+  if (sp) sp.textContent = _pts + ' Pkt';
+}
+
+async function syncPoints() {
+  if (!_ptsSig) return;
+  try {
+    const r = await fetch('/api/points/sync', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({points:_pts, sig:_ptsSig})});
+    const d = await r.json();
+    _savePoints(d.points, d.sig);
+  } catch(e) {}
+}
+
+function showPointsShop() {
+  document.getElementById('pointsOverlay').classList.add('show');
+}
+
+async function buyFeature(feature) {
+  const r = await fetch('/api/features/use', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({feature, points:_pts, sig:_ptsSig})});
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  _savePoints(d.points, d.sig);
+  if (feature === 'screen_draw') { closeOverlay('pointsOverlay'); openAdminDraw(); }
+  if (feature === 'screen_view') { closeOverlay('pointsOverlay'); showMyScreen(); }
+}
+
+function openGame(name) {
+  closeOverlay('gamesOverlay');
+  window.open('/games/' + name, '_blank');
+}
+
+// ── DRAW: FREUND MALT AUF ADMIN-SCREEN ────────────────────────────
+let _drawColor = '#ef4444', _drawing = false;
+
+function openAdminDraw() {
+  const ov = document.getElementById('drawOverlay');
+  const cv = document.getElementById('drawCanvas');
+  cv.width  = Math.min(window.innerWidth - 32, 380);
+  cv.height = Math.min(window.innerHeight - 160, 320);
+  ov.style.display = 'flex';
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cv.width, cv.height);
+  cv._lx = null; cv._ly = null;
+
+  function sendStroke(type, clientX, clientY) {
+    const r = cv.getBoundingClientRect();
+    fetch('/api/draw/stroke-relay', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        type, x: (clientX - r.left) / r.width, y: (clientY - r.top) / r.height,
+        color: _drawColor, w: 4
+      })
+    });
+  }
+
+  cv.onmousedown = e => { _drawing = true; cv._lx = null; sendStroke('down', e.clientX, e.clientY); };
+  cv.onmousemove = e => {
+    if (!_drawing) return;
+    const r = cv.getBoundingClientRect();
+    const nx = e.clientX - r.left, ny = e.clientY - r.top;
+    if (cv._lx !== null) {
+      ctx.strokeStyle = _drawColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cv._lx, cv._ly); ctx.lineTo(nx, ny); ctx.stroke();
+    }
+    cv._lx = nx; cv._ly = ny;
+    sendStroke('move', e.clientX, e.clientY);
+  };
+  cv.onmouseup = e => { _drawing = false; cv._lx = null; sendStroke('up', e.clientX, e.clientY); };
+  cv.ontouchstart = e => { e.preventDefault(); _drawing = true; cv._lx = null; sendStroke('down', e.touches[0].clientX, e.touches[0].clientY); };
+  cv.ontouchmove = e => {
+    e.preventDefault();
+    if (!_drawing) return;
+    const t = e.touches[0];
+    const r = cv.getBoundingClientRect();
+    const nx = t.clientX - r.left, ny = t.clientY - r.top;
+    if (cv._lx !== null) {
+      ctx.strokeStyle = _drawColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cv._lx, cv._ly); ctx.lineTo(nx, ny); ctx.stroke();
+    }
+    cv._lx = nx; cv._ly = ny;
+    sendStroke('move', t.clientX, t.clientY);
+  };
+  cv.ontouchend = e => { _drawing = false; cv._lx = null; sendStroke('up', 0, 0); };
+}
+
+function closeAdminDraw() {
+  document.getElementById('drawOverlay').style.display = 'none';
+  fetch('/api/draw/close-relay', {method: 'POST'});
+}
+
+function setDrawColor(c) { _drawColor = c; }
+
+// ── DRAW: ADMIN MALT AUF FREUND-SCREEN ────────────────────────────
+let _friendDrawInterval = null;
+
+function startFriendDrawPoll() {
+  if (_friendDrawInterval) return;
+  const cv = document.getElementById('friendDrawCanvas');
+  cv.width = window.innerWidth; cv.height = window.innerHeight;
+  const ctx = cv.getContext('2d');
+  let lx = null, ly = null;
+
+  _friendDrawInterval = setInterval(async () => {
+    try {
+      const r = await fetch('/api/draw/friend-strokes');
+      const d = await r.json();
+      if (!d.strokes || d.strokes.length === 0) return;
+      document.getElementById('friendDrawOverlay').style.display = 'block';
+      d.strokes.forEach(s => {
+        const x = s.x * cv.width, y = s.y * cv.height;
+        if (s.type === 'move' && lx !== null) {
+          ctx.strokeStyle = s.color || '#ef4444';
+          ctx.lineWidth = s.w || 4; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(x, y); ctx.stroke();
+        }
+        lx = x; ly = y;
+        if (s.type === 'up') { lx = null; ly = null; }
+      });
+    } catch(e) {}
+  }, 300);
+}
+
+function closeFriendDraw() {
+  document.getElementById('friendDrawOverlay').style.display = 'none';
+  const cv = document.getElementById('friendDrawCanvas');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+
+setTimeout(startFriendDrawPoll, 3000);
+
+window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 500); });
+
+// Beim Start
+_loadPoints();
+setTimeout(syncPoints, 2000);
+
 let ADMIN_URL = null;
 let _adminUrlReady = false;
 const _adminUrlPromise = fetch('/api/config').then(r=>r.json()).then(d=>{ ADMIN_URL = d.host_url || null; _adminUrlReady = true; });
@@ -1510,6 +1821,74 @@ micBtn.addEventListener('click', async () => {
 // ── FRESH START ON LOAD ──────────────────────────────────────────
 fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 </script>
+
+<!-- PUNKTE-SHOP OVERLAY -->
+<div class="overlay" id="pointsOverlay" onclick="closeOverlay('pointsOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">&#11088; Punkte-Shop</h2>
+      <span style="font-size:22px;font-weight:700;color:#4ade80;" id="shopPoints">0 Pkt</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="shop-btn" onclick="buyFeature('jumpscare')" data-cost="50">
+        <span>&#128123; Jumpscare beim Admin</span><span class="shop-cost" id="cost_jumpscare">50 &#11088;</span>
+      </button>
+      <button class="shop-btn" onclick="buyFeature('screen_view')" data-cost="30">
+        <span>&#128421;&#65039; Admin-Screen ansehen</span><span class="shop-cost" id="cost_screen_view">30 &#11088;</span>
+      </button>
+      <button class="shop-btn" onclick="buyFeature('screen_draw')" data-cost="40">
+        <span>&#127912; Auf Admin-Screen malen</span><span class="shop-cost" id="cost_screen_draw">40 &#11088;</span>
+      </button>
+    </div>
+    <div style="margin-top:16px;font-size:12px;color:var(--text2);text-align:center;">
+      Spiele Spiele um Punkte zu verdienen!
+    </div>
+  </div>
+</div>
+
+<!-- SPIELE OVERLAY -->
+<div class="overlay" id="gamesOverlay" onclick="closeOverlay('gamesOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2 style="margin-bottom:16px;">🎮 Spiele</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="shop-btn" onclick="openGame('pong')">
+        <span>🍕 Pong Solo</span><span style="color:#4ade80;font-size:13px;">+30 ⭐ bei 10 Wins</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('tetris')">
+        <span>👹 Tetris</span><span style="color:#c084fc;font-size:13px;">+25 ⭐ bei Level 5</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('snake')">
+        <span>🐍 Snake</span><span style="color:#4ade80;font-size:13px;">+20 ⭐ bei 20 Äpfeln</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('breakout')">
+        <span>😊 Breakout</span><span style="color:#38bdf8;font-size:13px;">+15 ⭐ bei Stage Clear</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- DRAW OVERLAY (Freund malt auf Admin-Screen) -->
+<div id="drawOverlay" style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.85);flex-direction:column;align-items:center;justify-content:center;">
+  <div style="color:#4ade80;font-size:16px;margin-bottom:8px;">&#127912; Male auf dem Admin-Bildschirm</div>
+  <canvas id="drawCanvas" style="border:2px solid #22c55e;border-radius:8px;cursor:crosshair;touch-action:none;background:#111;"></canvas>
+  <div style="display:flex;gap:8px;margin-top:12px;">
+    <button onclick="setDrawColor('#ef4444')" style="width:32px;height:32px;background:#ef4444;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#22c55e')" style="width:32px;height:32px;background:#22c55e;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#38bdf8')" style="width:32px;height:32px;background:#38bdf8;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#facc15')" style="width:32px;height:32px;background:#facc15;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#fff')" style="width:32px;height:32px;background:#fff;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="closeAdminDraw()" style="background:#1e293b;border:1px solid #475569;color:#e2e8f0;padding:8px 16px;border-radius:10px;cursor:pointer;">&#10005; Schlie&#223;en</button>
+  </div>
+</div>
+
+<!-- FRIEND DRAW OVERLAY (Admin malt auf Freund-Screen) -->
+<div id="friendDrawOverlay" style="display:none;position:fixed;inset:0;z-index:7000;pointer-events:none;">
+  <canvas id="friendDrawCanvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+  <button onclick="closeFriendDraw()" style="position:absolute;top:10px;right:10px;pointer-events:all;background:#0f172a;border:1px solid #475569;color:#e2e8f0;padding:8px 14px;border-radius:10px;cursor:pointer;z-index:7001;">&#10005;</button>
+</div>
+
 </body>
 </html>"""
 
