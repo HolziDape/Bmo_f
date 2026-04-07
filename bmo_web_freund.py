@@ -866,6 +866,9 @@ HTML = """<!DOCTYPE html>
       <span class="icon">🏓</span>Pong
       <span id="pongBadge" style="display:none;position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;align-items:center;justify-content:center;animation:pulse .8s infinite;">!</span>
     </button>
+    <button class="qbtn" onclick="document.getElementById('gamesOverlay').classList.add('show')" style="border-color:#f59e0b;color:#fbbf24;">
+      <span class="icon">🎮</span>Spiele
+    </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
     </button>
@@ -1114,6 +1117,11 @@ async function buyFeature(feature) {
   _savePoints(d.points, d.sig);
   if (feature === 'screen_draw') { closeOverlay('pointsOverlay'); openAdminDraw(); }
   if (feature === 'screen_view') { closeOverlay('pointsOverlay'); showMyScreen(); }
+}
+
+function openGame(name) {
+  closeOverlay('gamesOverlay');
+  window.open('/games/' + name, '_blank');
 }
 
 window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 500); });
@@ -1691,6 +1699,28 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
     </div>
     <div style="margin-top:16px;font-size:12px;color:var(--text2);text-align:center;">
       Spiele Spiele um Punkte zu verdienen!
+    </div>
+  </div>
+</div>
+
+<!-- SPIELE OVERLAY -->
+<div class="overlay" id="gamesOverlay" onclick="closeOverlay('gamesOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2 style="margin-bottom:16px;">🎮 Spiele</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="shop-btn" onclick="openGame('pong')">
+        <span>🍕 Pong Solo</span><span style="color:#4ade80;font-size:13px;">+30 ⭐ bei 10 Wins</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('tetris')">
+        <span>👹 Tetris</span><span style="color:#c084fc;font-size:13px;">+25 ⭐ bei Level 5</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('snake')">
+        <span>🐍 Snake</span><span style="color:#4ade80;font-size:13px;">+20 ⭐ bei 20 Äpfeln</span>
+      </button>
+      <button class="shop-btn" onclick="openGame('breakout')">
+        <span>😊 Breakout</span><span style="color:#38bdf8;font-size:13px;">+15 ⭐ bei Stage Clear</span>
+      </button>
     </div>
   </div>
 </div>
