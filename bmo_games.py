@@ -377,9 +377,87 @@ setInterval(()=>{step();draw();},150);
 </body>
 </html>"""
 
+_BREAKOUT_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO Breakout</title>
+<style>
+  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
+  canvas{border:2px solid #38bdf8;border-radius:4px;touch-action:none;}
+  #msg{font-size:16px;margin-top:12px;min-height:20px;color:#38bdf8;}
+</style>
+</head>
+<body>
+<h2 style="color:#38bdf8;margin-bottom:4px;">&#129522; BMO Breakout</h2>
+<div style="font-size:13px;color:#64748b;margin-bottom:8px;">Alle Steine zerst&#246;ren &rarr; +{{ points }} &#11088;</div>
+<canvas id="c" width="400" height="300"></canvas>
+<div id="msg">Maus/Touch bewegt Paddle</div>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=400,H=300,PW=70,PH=10,BALL=7,BROWS=4,BCOLS=8;
+const BCOLORS=['#ef4444','#f97316','#facc15','#22c55e'];
+let px=(W-PW)/2,bx=W/2,by=H-40,vx=3,vy=-4;
+let bricks=[],lives=3,done=false;
+
+for(let r=0;r<BROWS;r++)for(let c=0;c<BCOLS;c++)
+  bricks.push({x:c*48+8,y:r*22+30,w:44,h:18,alive:true,c:BCOLORS[r]});
+
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.clientX-r.left-PW/2));});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.touches[0].clientX-r.left-PW/2));},{passive:false});
+
+function draw(){
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,W,H);
+  bricks.forEach(b=>{if(!b.alive)return;ctx.fillStyle=b.c;ctx.beginPath();ctx.roundRect(b.x,b.y,b.w,b.h,3);ctx.fill();});
+  ctx.fillStyle='#38bdf8';ctx.beginPath();ctx.roundRect(px,H-PH-5,PW,PH,5);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#ef4444';ctx.font='14px sans-serif';ctx.textAlign='left';
+  ctx.fillText('\u2764\uFE0F'.repeat(lives),8,16);
+}
+
+function loop(){
+  if(done)return;
+  bx+=vx;by+=vy;
+  if(bx-BALL<0){bx=BALL;vx*=-1;}
+  if(bx+BALL>W){bx=W-BALL;vx*=-1;}
+  if(by-BALL<0){by=BALL;vy*=-1;}
+  if(by+BALL>H-PH-5&&bx>px&&bx<px+PW&&vy>0){
+    vy*=-1;vx+=(bx-(px+PW/2))*0.05;
+  }
+  if(by>H){
+    lives--;
+    if(lives<=0){document.getElementById('msg').textContent='Game Over! Seite neu laden.';return;}
+    bx=W/2;by=H-40;vx=3;vy=-4;
+  }
+  bricks.forEach(b=>{
+    if(!b.alive)return;
+    if(bx+BALL>b.x&&bx-BALL<b.x+b.w&&by+BALL>b.y&&by-BALL<b.y+b.h){
+      b.alive=false;vy*=-1;
+    }
+  });
+  const alive=bricks.filter(b=>b.alive).length;
+  if(alive===0&&!done){done=true;finish();return;}
+  draw();requestAnimationFrame(loop);
+}
+
+async function finish(){
+  document.getElementById('msg').textContent='Alle Steine! Punkte werden gutgeschrieben...';
+  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
+  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:'{{ token }}',game:'breakout',points:stored.points||0,sig:stored.sig||''})});
+  const d=await r.json();
+  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
+  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
+  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte!';
+}
+
+draw();requestAnimationFrame(loop);
+</script>
+</body>
+</html>"""
+
 _GAME_PAGES: dict = {
     'pong':     _PONG_HTML,
     'tetris':   _TETRIS_HTML,
     'snake':    _SNAKE_HTML,
-    'breakout': '',
+    'breakout': _BREAKOUT_HTML,
 }
