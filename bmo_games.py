@@ -139,8 +139,9 @@ def api_games_complete():
     current_points = int(data.get('points', 0))
     current_sig    = data.get('sig', '')
 
-    config_path = current_app.config.get('CONFIG_TXT', 'config.txt')
-    secret      = current_app.config.get('POINTS_SECRET', '')
+    secret = current_app.config.get('POINTS_SECRET', '')
+    if not secret:
+        return jsonify(error='Serverkonfiguration fehlt'), 500
 
     if not _bp.verify(current_points, current_sig, secret):
         return jsonify(error='Ungültige Signatur'), 403
