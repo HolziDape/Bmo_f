@@ -13,6 +13,11 @@ DEFAULT_COSTS = {
     'screen_draw': 40,
 }
 
+def _safe_id(freund_id: str) -> str:
+    """Sanitize freund_id for use as filename — only keep alphanum, dots, hyphens."""
+    import re
+    return re.sub(r'[^a-zA-Z0-9.\-]', '_', freund_id)[:64]
+
 def ensure_secret(config_path: str) -> str:
     """Liest POINTS_SECRET aus config.txt; generiert + speichert falls fehlend."""
     lines = []
@@ -59,14 +64,17 @@ def get_costs(config_path: str) -> dict:
 def save_points_admin(points: int, freund_id: str, data_dir: str) -> None:
     """Speichert verifizierten Punkte-Stand für einen Freund (auf Admin-PC)."""
     os.makedirs(data_dir, exist_ok=True)
-    path = os.path.join(data_dir, f'points_{freund_id.replace(":", "_").replace(".", "_")}.json')
+    path = os.path.join(data_dir, f'points_{_safe_id(freund_id)}.json')
     with open(path, 'w', encoding='utf-8') as f:
         json.dump({'points': points, 'freund_id': freund_id}, f)
 
 def load_points_admin(freund_id: str, data_dir: str) -> int:
     """Lädt gespeicherten Punkte-Stand für einen Freund (auf Admin-PC)."""
-    path = os.path.join(data_dir, f'points_{freund_id.replace(":", "_").replace(".", "_")}.json')
+    path = os.path.join(data_dir, f'points_{_safe_id(freund_id)}.json')
     if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f).get('points', 0)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f).get('points', 0)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            return 0
     return 0
