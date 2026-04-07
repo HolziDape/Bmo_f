@@ -261,6 +261,44 @@ def api_features_use():
     return jsonify(points=new_points, sig=new_sig, result=result)
 
 
+# ── DRAW RELAY ROUTES ──────────────────────────────────────────────
+
+@app.route('/api/draw/stroke-relay', methods=['POST'])
+@login_required
+def api_draw_stroke_relay():
+    """Leitet Strich-Daten vom Browser an Admin-Core weiter."""
+    data = request.get_json(silent=True) or {}
+    if CORE_URL:
+        try:
+            req.post(f'{CORE_URL}/api/draw/stroke', json=data, timeout=1)
+        except Exception:
+            pass
+    return jsonify(ok=True)
+
+@app.route('/api/draw/friend-strokes', methods=['GET'])
+@login_required
+def api_draw_friend_strokes():
+    """Pollt Admin-Striche für den Freund-Browser."""
+    if not CORE_URL:
+        return jsonify(strokes=[])
+    try:
+        r = req.get(f'{CORE_URL}/api/draw/strokes', timeout=2)
+        return jsonify(strokes=r.json().get('strokes', []))
+    except Exception:
+        return jsonify(strokes=[])
+
+@app.route('/api/draw/close-relay', methods=['POST'])
+@login_required
+def api_draw_close_relay():
+    """Schließt Draw-Session auf Admin-Core."""
+    if CORE_URL:
+        try:
+            req.post(f'{CORE_URL}/api/draw/close', timeout=2)
+        except Exception:
+            pass
+    return jsonify(ok=True)
+
+
 # ══════════════════════════════════════════════════════════════════
 # ADMIN-ZUGRIFF STATUS (In-Memory)
 # ══════════════════════════════════════════════════════════════════
@@ -1124,6 +1162,106 @@ function openGame(name) {
   window.open('/games/' + name, '_blank');
 }
 
+// ── DRAW: FREUND MALT AUF ADMIN-SCREEN ────────────────────────────
+let _drawColor = '#ef4444', _drawing = false;
+
+function openAdminDraw() {
+  const ov = document.getElementById('drawOverlay');
+  const cv = document.getElementById('drawCanvas');
+  cv.width  = Math.min(window.innerWidth - 32, 380);
+  cv.height = Math.min(window.innerHeight - 160, 320);
+  ov.style.display = 'flex';
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cv.width, cv.height);
+  cv._lx = null; cv._ly = null;
+
+  function sendStroke(type, clientX, clientY) {
+    const r = cv.getBoundingClientRect();
+    fetch('/api/draw/stroke-relay', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        type, x: (clientX - r.left) / r.width, y: (clientY - r.top) / r.height,
+        color: _drawColor, w: 4
+      })
+    });
+  }
+
+  cv.onmousedown = e => { _drawing = true; cv._lx = null; sendStroke('down', e.clientX, e.clientY); };
+  cv.onmousemove = e => {
+    if (!_drawing) return;
+    const r = cv.getBoundingClientRect();
+    const nx = e.clientX - r.left, ny = e.clientY - r.top;
+    if (cv._lx !== null) {
+      ctx.strokeStyle = _drawColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cv._lx, cv._ly); ctx.lineTo(nx, ny); ctx.stroke();
+    }
+    cv._lx = nx; cv._ly = ny;
+    sendStroke('move', e.clientX, e.clientY);
+  };
+  cv.onmouseup = e => { _drawing = false; cv._lx = null; sendStroke('up', e.clientX, e.clientY); };
+  cv.ontouchstart = e => { e.preventDefault(); _drawing = true; cv._lx = null; sendStroke('down', e.touches[0].clientX, e.touches[0].clientY); };
+  cv.ontouchmove = e => {
+    e.preventDefault();
+    if (!_drawing) return;
+    const t = e.touches[0];
+    const r = cv.getBoundingClientRect();
+    const nx = t.clientX - r.left, ny = t.clientY - r.top;
+    if (cv._lx !== null) {
+      ctx.strokeStyle = _drawColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cv._lx, cv._ly); ctx.lineTo(nx, ny); ctx.stroke();
+    }
+    cv._lx = nx; cv._ly = ny;
+    sendStroke('move', t.clientX, t.clientY);
+  };
+  cv.ontouchend = e => { _drawing = false; cv._lx = null; sendStroke('up', 0, 0); };
+}
+
+function closeAdminDraw() {
+  document.getElementById('drawOverlay').style.display = 'none';
+  fetch('/api/draw/close-relay', {method: 'POST'});
+}
+
+function setDrawColor(c) { _drawColor = c; }
+
+// ── DRAW: ADMIN MALT AUF FREUND-SCREEN ────────────────────────────
+let _friendDrawInterval = null;
+
+function startFriendDrawPoll() {
+  if (_friendDrawInterval) return;
+  const cv = document.getElementById('friendDrawCanvas');
+  cv.width = window.innerWidth; cv.height = window.innerHeight;
+  const ctx = cv.getContext('2d');
+  let lx = null, ly = null;
+
+  _friendDrawInterval = setInterval(async () => {
+    try {
+      const r = await fetch('/api/draw/friend-strokes');
+      const d = await r.json();
+      if (!d.strokes || d.strokes.length === 0) return;
+      document.getElementById('friendDrawOverlay').style.display = 'block';
+      d.strokes.forEach(s => {
+        const x = s.x * cv.width, y = s.y * cv.height;
+        if (s.type === 'move' && lx !== null) {
+          ctx.strokeStyle = s.color || '#ef4444';
+          ctx.lineWidth = s.w || 4; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(x, y); ctx.stroke();
+        }
+        lx = x; ly = y;
+        if (s.type === 'up') { lx = null; ly = null; }
+      });
+    } catch(e) {}
+  }, 300);
+}
+
+function closeFriendDraw() {
+  document.getElementById('friendDrawOverlay').style.display = 'none';
+  const cv = document.getElementById('friendDrawCanvas');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+
+setTimeout(startFriendDrawPoll, 3000);
+
 window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 500); });
 
 // Beim Start
@@ -1723,6 +1861,26 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
       </button>
     </div>
   </div>
+</div>
+
+<!-- DRAW OVERLAY (Freund malt auf Admin-Screen) -->
+<div id="drawOverlay" style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.85);flex-direction:column;align-items:center;justify-content:center;">
+  <div style="color:#4ade80;font-size:16px;margin-bottom:8px;">&#127912; Male auf dem Admin-Bildschirm</div>
+  <canvas id="drawCanvas" style="border:2px solid #22c55e;border-radius:8px;cursor:crosshair;touch-action:none;background:#111;"></canvas>
+  <div style="display:flex;gap:8px;margin-top:12px;">
+    <button onclick="setDrawColor('#ef4444')" style="width:32px;height:32px;background:#ef4444;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#22c55e')" style="width:32px;height:32px;background:#22c55e;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#38bdf8')" style="width:32px;height:32px;background:#38bdf8;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#facc15')" style="width:32px;height:32px;background:#facc15;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="setDrawColor('#fff')" style="width:32px;height:32px;background:#fff;border:none;border-radius:50%;cursor:pointer;"></button>
+    <button onclick="closeAdminDraw()" style="background:#1e293b;border:1px solid #475569;color:#e2e8f0;padding:8px 16px;border-radius:10px;cursor:pointer;">&#10005; Schlie&#223;en</button>
+  </div>
+</div>
+
+<!-- FRIEND DRAW OVERLAY (Admin malt auf Freund-Screen) -->
+<div id="friendDrawOverlay" style="display:none;position:fixed;inset:0;z-index:7000;pointer-events:none;">
+  <canvas id="friendDrawCanvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+  <button onclick="closeFriendDraw()" style="position:absolute;top:10px;right:10px;pointer-events:all;background:#0f172a;border:1px solid #475569;color:#e2e8f0;padding:8px 14px;border-radius:10px;cursor:pointer;z-index:7001;">&#10005;</button>
 </div>
 
 </body>
