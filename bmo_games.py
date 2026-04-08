@@ -132,7 +132,9 @@ def api_games_complete():
     if not secret:
         return jsonify(error='Serverkonfiguration fehlt'), 500
 
-    if not _bp.verify(current_points, current_sig, secret):
+    if current_points == 0 and current_sig == '':
+        pass  # Frischer Start — keine Signatur vorhanden
+    elif not _bp.verify(current_points, current_sig, secret):
         return jsonify(error='Ungültige Signatur'), 403
 
     earned     = session['earned']
