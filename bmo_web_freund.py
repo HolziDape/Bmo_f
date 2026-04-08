@@ -1895,16 +1895,6 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
         </div>
       </div>
 
-      <div>
-        <div class="game-label">&#129522; Breakout</div>
-        <div class="diff-row">
-          <button class="diff-btn easy"   onclick="openGame('breakout','easy')">Easy<br><small>3&#11088;</small></button>
-          <button class="diff-btn normal" onclick="openGame('breakout','normal')">Normal<br><small>7&#11088;</small></button>
-          <button class="diff-btn hard"   onclick="openGame('breakout','hard')">Hard<br><small>15&#11088;</small></button>
-          <button class="diff-btn insane" onclick="openGame('breakout','insane')">Insane<br><small>45&#11088;</small></button>
-        </div>
-      </div>
-
     </div>
   </div>
 </div>
