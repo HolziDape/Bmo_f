@@ -232,6 +232,7 @@ async function finish(){
 
 resetBall();loop();
 </script>
+<button onclick="location.reload()" style="margin-top:16px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 
@@ -376,6 +377,7 @@ newPiece();
 document.getElementById('msg').textContent='Level '+level+' | Zeilen '+lines+' | Score '+score;
 requestAnimationFrame(loop);
 </script>
+<button onclick="location.reload()" style="margin-top:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 
@@ -467,6 +469,7 @@ async function finish(){
 randApple();
 setInterval(()=>{step();draw();},TICK);
 </script>
+<button onclick="location.reload()" style="margin-top:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 

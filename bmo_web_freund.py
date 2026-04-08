@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5001
+PORT = 5000
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -172,6 +172,11 @@ if not SPOTIFY_OK:
 # ══════════════════════════════════════════════════════════════════
 # PUNKTE-SYSTEM
 # ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/ping')
+def api_ping():
+    return 'ok'
+
 
 @app.route('/api/points/sync', methods=['POST'])
 @login_required
@@ -920,6 +925,9 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="document.getElementById('gamesOverlay').classList.add('show')" style="border-color:#f59e0b;color:#fbbf24;">
       <span class="icon">🎮</span>Spiele
     </button>
+    <button class="qbtn" id="liteReqBtn" onclick="requestLiteOff()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚡</span>Lite aus?
+    </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
     </button>
@@ -1179,6 +1187,21 @@ function showMultiplayer() {
   document.getElementById('multiplayerOverlay').classList.add('show');
 }
 
+async function requestLiteOff() {
+  const btn = document.getElementById('liteReqBtn');
+  if (!ADMIN_URL) { alert('Admin nicht verbunden.'); return; }
+  btn.disabled = true;
+  btn.textContent = '⚡ Gesendet...';
+  try {
+    await fetch(`${ADMIN_URL}/api/lite-request`, {method: 'POST'});
+    btn.textContent = '⚡ Anfrage ✓';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 10000);
+  } catch(e) {
+    btn.textContent = '⚡ Fehler';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 3000);
+  }
+}
+
 // ── DRAW: FREUND MALT AUF ADMIN-SCREEN ────────────────────────────
 let _drawColor = '#ef4444', _drawing = false;
 
@@ -1284,6 +1307,9 @@ window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 5
 // Beim Start
 _loadPoints();
 setTimeout(syncPoints, 2000);
+
+// Keepalive: verhindert Flask-Idle-Shutdown
+setInterval(() => fetch('/api/ping').catch(()=>{}), 30000);
 
 let ADMIN_URL = null;
 let _adminUrlReady = false;
