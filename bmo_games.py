@@ -398,9 +398,13 @@ _SNAKE_HTML = r"""<!DOCTYPE html>
   #msg{font-size:16px;margin-top:12px;min-height:20px;color:#4ade80;}
   .ctrl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px;width:150px;}
   .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:12px;border-radius:10px;font-size:18px;cursor:pointer;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:4px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
 <h2 style="color:#4ade80;margin-bottom:4px;">&#128013; BMO Snake</h2>
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">20 &#196;pfel essen &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="300" height="300"></canvas>
@@ -412,7 +416,7 @@ _SNAKE_HTML = r"""<!DOCTYPE html>
   <button ontouchstart="setDir(1,0)">&#9654;</button>
 </div>
 <script>
-const SZ=20,COLS=15,ROWS=15;
+const SZ=20,COLS=15,ROWS=15,TICK={{ tick }};
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 let snake=[{x:7,y:7}],dir={x:1,y:0},nextDir={x:1,y:0};
 let apple={x:3,y:3},eaten=0,dead=false,done=false;
@@ -470,7 +474,7 @@ async function finish(){
 }
 
 randApple();
-setInterval(()=>{step();draw();},150);
+setInterval(()=>{step();draw();},TICK);
 </script>
 </body>
 </html>"""
