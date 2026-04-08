@@ -890,6 +890,8 @@ HTML = """<!DOCTYPE html>
   .diff-btn.hard{border-color:#f97316;color:#fb923c;}
   .diff-btn.insane{border-color:#ef4444;color:#f87171;}
   .game-label{font-size:15px;font-weight:600;margin-top:4px;}
+  @keyframes pulse-text{0%,100%{opacity:1}50%{opacity:.4}}
+  .bmo-thinking{animation:pulse-text 1.4s ease-in-out infinite;}
 </style>
 </head>
 <body>
@@ -899,6 +901,7 @@ HTML = """<!DOCTYPE html>
     <div>
       <h1>BMO</h1>
       <span class="sub" id="coreStatus">Verbinde...</span>
+      <span id="bmoReady" style="font-size:11px;margin-left:4px;"></span>
     </div>
     <div id="pointsBadge" style="margin-left:auto;background:rgba(34,197,94,0.12);border:1px solid #22c55e;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700;color:#4ade80;cursor:pointer;" onclick="showPointsShop()">
       &#11088; <span id="pointsVal">0</span>
