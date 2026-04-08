@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5000
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -1358,7 +1358,11 @@ async function updateStatus() {
     ramBar.className = 'bar-fill' + (ram > 90 ? ' crit' : ram > 70 ? ' warn' : '');
     const readyEl = document.getElementById('bmoReady');
     if (readyEl) {
-      if (d.busy) {
+      if (d.lite_mode) {
+        readyEl.textContent = '· Lite-Modus';
+        readyEl.style.color = '#64748b';
+        readyEl.classList.remove('bmo-thinking');
+      } else if (d.busy) {
         readyEl.textContent = '· Am Denken...';
         readyEl.style.color = '#f59e0b';
         readyEl.classList.add('bmo-thinking');
