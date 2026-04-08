@@ -1190,6 +1190,22 @@ function showMultiplayer() {
   document.getElementById('multiplayerOverlay').classList.add('show');
 }
 
+function updateLiteBtn(lite_mode) {
+  const btn = document.getElementById('liteReqBtn');
+  if (!btn) return;
+  if (lite_mode === false) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="icon">✓</span>Lite aus';
+    btn.style.borderColor = '#4ade80';
+    btn.style.color = '#4ade80';
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="icon">⚡</span>Lite aus?';
+    btn.style.borderColor = '#475569';
+    btn.style.color = '#94a3b8';
+  }
+}
+
 async function requestLiteOff() {
   const btn = document.getElementById('liteReqBtn');
   if (!ADMIN_URL) { alert('Admin nicht verbunden.'); return; }
@@ -1198,7 +1214,7 @@ async function requestLiteOff() {
   try {
     await fetch(`${ADMIN_URL}/api/lite-request`, {method: 'POST'});
     btn.textContent = '⚡ Anfrage ✓';
-    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 10000);
+    // updateStatus (alle 5s) aktualisiert den Button-Zustand via updateLiteBtn
   } catch(e) {
     btn.textContent = '⚡ Fehler';
     setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 3000);
@@ -1340,10 +1356,29 @@ async function updateStatus() {
     const ramBar = document.getElementById('sRamBar');
     ramBar.style.width = ram + '%';
     ramBar.className = 'bar-fill' + (ram > 90 ? ' crit' : ram > 70 ? ' warn' : '');
+    const readyEl = document.getElementById('bmoReady');
+    if (readyEl) {
+      if (d.busy) {
+        readyEl.textContent = '· Am Denken...';
+        readyEl.style.color = '#f59e0b';
+        readyEl.classList.add('bmo-thinking');
+      } else {
+        readyEl.textContent = '· Bereit';
+        readyEl.style.color = '#4ade80';
+        readyEl.classList.remove('bmo-thinking');
+      }
+    }
   } catch(e) {
     document.getElementById('coreDot').classList.add('off');
     document.getElementById('coreStatus').textContent = 'Core offline';
+    const readyEl = document.getElementById('bmoReady');
+    if (readyEl) { readyEl.textContent = ''; readyEl.classList.remove('bmo-thinking'); }
   }
+  try {
+    const lr = await fetch('/api/lite-mode');
+    const ld = await lr.json();
+    if (ld.lite_mode !== undefined && ld.lite_mode !== null) updateLiteBtn(ld.lite_mode);
+  } catch(e) {}
 }
 updateStatus();
 setInterval(updateStatus, 5000);
