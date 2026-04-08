@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5001
+PORT = 5000
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -2100,6 +2100,8 @@ def status():
 @app.route('/api/lite-mode')
 @login_required
 def api_lite_mode():
+    if not CORE_URL:
+        return jsonify(lite_mode=None)
     try:
         r = req.get(f"{CORE_URL}/lite-mode", timeout=3)
         return jsonify(r.json())
