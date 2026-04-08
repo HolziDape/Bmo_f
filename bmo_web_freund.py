@@ -1378,7 +1378,7 @@ async function updateStatus() {
     const lr = await fetch('/api/lite-mode');
     const ld = await lr.json();
     if (ld.lite_mode !== undefined && ld.lite_mode !== null) updateLiteBtn(ld.lite_mode);
-  } catch(e) {}
+  } catch(e) { console.debug('[lite-mode poll]', e); }
 }
 updateStatus();
 setInterval(updateStatus, 5000);
