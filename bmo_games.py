@@ -487,9 +487,13 @@ _BREAKOUT_HTML = r"""<!DOCTYPE html>
   body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
   canvas{border:2px solid #38bdf8;border-radius:4px;touch-action:none;}
   #msg{font-size:16px;margin-top:12px;min-height:20px;color:#38bdf8;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:4px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
 <h2 style="color:#38bdf8;margin-bottom:4px;">&#129522; BMO Breakout</h2>
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">Alle Steine zerst&#246;ren &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="400" height="300"></canvas>
@@ -498,7 +502,7 @@ _BREAKOUT_HTML = r"""<!DOCTYPE html>
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const W=400,H=300,PW=70,PH=10,BALL=7,BROWS=4,BCOLS=8;
 const BCOLORS=['#ef4444','#f97316','#facc15','#22c55e'];
-let px=(W-PW)/2,bx=W/2,by=H-40,vx=3,vy=-4;
+let px=(W-PW)/2,bx=W/2,by=H-40,vx={{ bvx }},vy=-{{ bvy }};
 let bricks=[],lives=3,done=false;
 
 for(let r=0;r<BROWS;r++)for(let c=0;c<BCOLS;c++)
@@ -528,7 +532,7 @@ function loop(){
   if(by>H){
     lives--;
     if(lives<=0){document.getElementById('msg').textContent='Game Over! Seite neu laden.';return;}
-    bx=W/2;by=H-40;vx=3;vy=-4;
+    bx=W/2;by=H-40;vx={{ bvx }};vy=-{{ bvy }};
   }
   bricks.forEach(b=>{
     if(!b.alive)return;
