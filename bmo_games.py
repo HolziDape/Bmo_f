@@ -30,10 +30,10 @@ BASE_POINTS = {
 
 # Multiplikatoren pro Schwierigkeit
 DIFF_MULTIPLIER = {
-    'easy':   0.5,
-    'normal': 1.0,
-    'hard':   1.5,
-    'insane': 2.0,
+    'easy':   0.25,
+    'normal': 0.5,
+    'hard':   1.0,
+    'insane': 3.0,
 }
 
 # Minimale Spielzeit (Anti-Cheat) pro (Spiel, Schwierigkeit)
@@ -59,9 +59,9 @@ MIN_GAME_SECONDS = {
 # Spiel-spezifische Parameter pro Schwierigkeit (werden als Template-Variablen übergeben)
 DIFF_PARAMS = {
     'pong': {
-        'easy':   {'speed': 3,   'ai_factor': 0.06},
-        'normal': {'speed': 4,   'ai_factor': 0.10},
-        'hard':   {'speed': 5.5, 'ai_factor': 0.14},
+        'easy':   {'speed': 1.5, 'ai_factor': 0.03},
+        'normal': {'speed': 2.5, 'ai_factor': 0.05},
+        'hard':   {'speed': 4.0, 'ai_factor': 0.08},
         'insane': {'speed': 7,   'ai_factor': 0.19},
     },
     'tetris': {
@@ -77,9 +77,9 @@ DIFF_PARAMS = {
         'insane': {'tick': 65},
     },
     'breakout': {
-        'easy':   {'bvx': 2.5, 'bvy': 3.5},
-        'normal': {'bvx': 3.0, 'bvy': 4.0},
-        'hard':   {'bvx': 4.5, 'bvy': 5.5},
+        'easy':   {'bvx': 1.5, 'bvy': 2.0},
+        'normal': {'bvx': 2.0, 'bvy': 2.5},
+        'hard':   {'bvx': 3.0, 'bvy': 4.0},
         'insane': {'bvx': 6.0, 'bvy': 7.0},
     },
 }

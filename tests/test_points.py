@@ -64,12 +64,12 @@ from bmo_games import BASE_POINTS, DIFF_MULTIPLIER
 
 def test_diff_multiplier_easy():
     result = _math.floor(BASE_POINTS['pong'] * DIFF_MULTIPLIER['easy'])
-    assert result == 15
+    assert result == 7
 
 def test_diff_multiplier_insane():
     result = _math.floor(BASE_POINTS['tetris'] * DIFF_MULTIPLIER['insane'])
-    assert result == 50
+    assert result == 75
 
 def test_diff_multiplier_hard_snake():
     result = _math.floor(BASE_POINTS['snake'] * DIFF_MULTIPLIER['hard'])
-    assert result == 30
+    assert result == 20

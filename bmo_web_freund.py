@@ -1868,40 +1868,40 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
       <div>
         <div class="game-label">&#127955; Pong Solo</div>
         <div class="diff-row">
-          <button class="diff-btn easy"   onclick="openGame('pong','easy')">Easy<br><small>15&#11088;</small></button>
-          <button class="diff-btn normal" onclick="openGame('pong','normal')">Normal<br><small>30&#11088;</small></button>
-          <button class="diff-btn hard"   onclick="openGame('pong','hard')">Hard<br><small>45&#11088;</small></button>
-          <button class="diff-btn insane" onclick="openGame('pong','insane')">Insane<br><small>60&#11088;</small></button>
+          <button class="diff-btn easy"   onclick="openGame('pong','easy')">Easy<br><small>7&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('pong','normal')">Normal<br><small>15&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('pong','hard')">Hard<br><small>30&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('pong','insane')">Insane<br><small>90&#11088;</small></button>
         </div>
       </div>
 
       <div>
         <div class="game-label">&#129689; Tetris</div>
         <div class="diff-row">
-          <button class="diff-btn easy"   onclick="openGame('tetris','easy')">Easy<br><small>12&#11088;</small></button>
-          <button class="diff-btn normal" onclick="openGame('tetris','normal')">Normal<br><small>25&#11088;</small></button>
-          <button class="diff-btn hard"   onclick="openGame('tetris','hard')">Hard<br><small>37&#11088;</small></button>
-          <button class="diff-btn insane" onclick="openGame('tetris','insane')">Insane<br><small>50&#11088;</small></button>
+          <button class="diff-btn easy"   onclick="openGame('tetris','easy')">Easy<br><small>6&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('tetris','normal')">Normal<br><small>12&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('tetris','hard')">Hard<br><small>25&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('tetris','insane')">Insane<br><small>75&#11088;</small></button>
         </div>
       </div>
 
       <div>
         <div class="game-label">&#128013; Snake</div>
         <div class="diff-row">
-          <button class="diff-btn easy"   onclick="openGame('snake','easy')">Easy<br><small>10&#11088;</small></button>
-          <button class="diff-btn normal" onclick="openGame('snake','normal')">Normal<br><small>20&#11088;</small></button>
-          <button class="diff-btn hard"   onclick="openGame('snake','hard')">Hard<br><small>30&#11088;</small></button>
-          <button class="diff-btn insane" onclick="openGame('snake','insane')">Insane<br><small>40&#11088;</small></button>
+          <button class="diff-btn easy"   onclick="openGame('snake','easy')">Easy<br><small>5&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('snake','normal')">Normal<br><small>10&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('snake','hard')">Hard<br><small>20&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('snake','insane')">Insane<br><small>60&#11088;</small></button>
         </div>
       </div>
 
       <div>
         <div class="game-label">&#129522; Breakout</div>
         <div class="diff-row">
-          <button class="diff-btn easy"   onclick="openGame('breakout','easy')">Easy<br><small>7&#11088;</small></button>
-          <button class="diff-btn normal" onclick="openGame('breakout','normal')">Normal<br><small>15&#11088;</small></button>
-          <button class="diff-btn hard"   onclick="openGame('breakout','hard')">Hard<br><small>22&#11088;</small></button>
-          <button class="diff-btn insane" onclick="openGame('breakout','insane')">Insane<br><small>30&#11088;</small></button>
+          <button class="diff-btn easy"   onclick="openGame('breakout','easy')">Easy<br><small>3&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('breakout','normal')">Normal<br><small>7&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('breakout','hard')">Hard<br><small>15&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('breakout','insane')">Insane<br><small>45&#11088;</small></button>
         </div>
       </div>
 
