@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5000
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -2095,7 +2095,17 @@ def status():
         cpu = psutil.cpu_percent(interval=0.5)
         ram = psutil.virtual_memory().percent
         t   = datetime.datetime.now().strftime('%H:%M')
-        return jsonify(cpu=cpu, ram=ram, time=t, gpu=None)
+        return jsonify(cpu=cpu, ram=ram, time=t, gpu=None, busy=False)
+
+@app.route('/api/lite-mode')
+@login_required
+def api_lite_mode():
+    try:
+        r = req.get(f"{CORE_URL}/lite-mode", timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(lite_mode=None)
+
 
 @app.route('/api/settings', methods=['GET'])
 @login_required
