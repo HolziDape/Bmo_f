@@ -173,6 +173,11 @@ if not SPOTIFY_OK:
 # PUNKTE-SYSTEM
 # ══════════════════════════════════════════════════════════════════
 
+@app.route('/api/ping')
+def api_ping():
+    return 'ok'
+
+
 @app.route('/api/points/sync', methods=['POST'])
 @login_required
 def api_points_sync():
@@ -878,6 +883,13 @@ HTML = """<!DOCTYPE html>
   .shop-btn { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; color:var(--text); font-size:15px; cursor:pointer; transition:background .15s; width:100%; }
   .shop-btn:active { background:var(--border); }
   .shop-cost { font-weight:700; color:#4ade80; font-size:14px; }
+  .diff-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
+  .diff-btn{flex:1;min-width:60px;padding:8px 4px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;text-align:center;}
+  .diff-btn.easy{border-color:#22c55e;color:#4ade80;}
+  .diff-btn.normal{border-color:#3b82f6;color:#60a5fa;}
+  .diff-btn.hard{border-color:#f97316;color:#fb923c;}
+  .diff-btn.insane{border-color:#ef4444;color:#f87171;}
+  .game-label{font-size:15px;font-weight:600;margin-top:4px;}
 </style>
 </head>
 <body>
@@ -906,12 +918,15 @@ HTML = """<!DOCTYPE html>
     <button class="qbtn" onclick="showMyScreen()" style="border-color:#0ea5e9;color:#38bdf8;">
       <span class="icon">🖥️</span>Mein Screen
     </button>
-    <button class="qbtn" onclick="showPong()" style="border-color:#22c55e;color:#4ade80;position:relative;">
-      <span class="icon">🏓</span>Pong
+    <button class="qbtn" onclick="showMultiplayer()" style="border-color:#22c55e;color:#4ade80;position:relative;">
+      <span class="icon">&#127918;</span>Multi
       <span id="pongBadge" style="display:none;position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;align-items:center;justify-content:center;animation:pulse .8s infinite;">!</span>
     </button>
     <button class="qbtn" onclick="document.getElementById('gamesOverlay').classList.add('show')" style="border-color:#f59e0b;color:#fbbf24;">
       <span class="icon">🎮</span>Spiele
+    </button>
+    <button class="qbtn" id="liteReqBtn" onclick="requestLiteOff()" style="border-color:#475569;color:#94a3b8;">
+      <span class="icon">⚡</span>Lite aus?
     </button>
     <button class="qbtn admin-off" id="adminBtn" onclick="showAdminOverlay()">
       <span class="icon" id="adminIcon">🔒</span>Admin
@@ -1163,9 +1178,28 @@ async function buyFeature(feature) {
   if (feature === 'screen_view') { closeOverlay('pointsOverlay'); showMyScreen(); }
 }
 
-function openGame(name) {
+function openGame(name, diff) {
   closeOverlay('gamesOverlay');
-  window.open('/games/' + name, '_blank');
+  window.open('/games/' + name + '?diff=' + (diff || 'normal'), '_blank');
+}
+
+function showMultiplayer() {
+  document.getElementById('multiplayerOverlay').classList.add('show');
+}
+
+async function requestLiteOff() {
+  const btn = document.getElementById('liteReqBtn');
+  if (!ADMIN_URL) { alert('Admin nicht verbunden.'); return; }
+  btn.disabled = true;
+  btn.textContent = '⚡ Gesendet...';
+  try {
+    await fetch(`${ADMIN_URL}/api/lite-request`, {method: 'POST'});
+    btn.textContent = '⚡ Anfrage ✓';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 10000);
+  } catch(e) {
+    btn.textContent = '⚡ Fehler';
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 3000);
+  }
 }
 
 // ── DRAW: FREUND MALT AUF ADMIN-SCREEN ────────────────────────────
@@ -1273,6 +1307,9 @@ window.addEventListener('focus', () => { _loadPoints(); setTimeout(syncPoints, 5
 // Beim Start
 _loadPoints();
 setTimeout(syncPoints, 2000);
+
+// Keepalive: verhindert Flask-Idle-Shutdown
+setInterval(() => fetch('/api/ping').catch(()=>{}), 30000);
 
 let ADMIN_URL = null;
 let _adminUrlReady = false;
@@ -1851,20 +1888,56 @@ fetch('/api/history/clear', {method: 'POST'}).catch(() => {});
 <div class="overlay" id="gamesOverlay" onclick="closeOverlay('gamesOverlay')">
   <div class="sheet" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <h2 style="margin-bottom:16px;">🎮 Spiele</h2>
+    <h2 style="margin-bottom:16px;">&#127918; Spiele</h2>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+
+      <div>
+        <div class="game-label">&#127955; Pong Solo</div>
+        <div class="diff-row">
+          <button class="diff-btn easy"   onclick="openGame('pong','easy')">Easy<br><small>7&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('pong','normal')">Normal<br><small>15&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('pong','hard')">Hard<br><small>30&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('pong','insane')">Insane<br><small>90&#11088;</small></button>
+        </div>
+      </div>
+
+      <div>
+        <div class="game-label">&#129689; Tetris</div>
+        <div class="diff-row">
+          <button class="diff-btn easy"   onclick="openGame('tetris','easy')">Easy<br><small>6&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('tetris','normal')">Normal<br><small>12&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('tetris','hard')">Hard<br><small>25&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('tetris','insane')">Insane<br><small>75&#11088;</small></button>
+        </div>
+      </div>
+
+      <div>
+        <div class="game-label">&#128013; Snake</div>
+        <div class="diff-row">
+          <button class="diff-btn easy"   onclick="openGame('snake','easy')">Easy<br><small>5&#11088;</small></button>
+          <button class="diff-btn normal" onclick="openGame('snake','normal')">Normal<br><small>10&#11088;</small></button>
+          <button class="diff-btn hard"   onclick="openGame('snake','hard')">Hard<br><small>20&#11088;</small></button>
+          <button class="diff-btn insane" onclick="openGame('snake','insane')">Insane<br><small>60&#11088;</small></button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- MULTIPLAYER OVERLAY -->
+<div class="overlay" id="multiplayerOverlay" onclick="closeOverlay('multiplayerOverlay')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <h2 style="margin-bottom:16px;">&#127918; Multiplayer</h2>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <button class="shop-btn" onclick="openGame('pong')">
-        <span>🍕 Pong Solo</span><span style="color:#4ade80;font-size:13px;">+30 ⭐ bei 10 Wins</span>
+      <button class="shop-btn" onclick="closeOverlay('multiplayerOverlay');showPong()">
+        <span>&#127955; Pong mit Admin</span>
+        <span style="color:#4ade80;font-size:13px;">Echtzeit &#128257;</span>
       </button>
-      <button class="shop-btn" onclick="openGame('tetris')">
-        <span>👹 Tetris</span><span style="color:#c084fc;font-size:13px;">+25 ⭐ bei Level 5</span>
-      </button>
-      <button class="shop-btn" onclick="openGame('snake')">
-        <span>🐍 Snake</span><span style="color:#4ade80;font-size:13px;">+20 ⭐ bei 20 Äpfeln</span>
-      </button>
-      <button class="shop-btn" onclick="openGame('breakout')">
-        <span>😊 Breakout</span><span style="color:#38bdf8;font-size:13px;">+15 ⭐ bei Stage Clear</span>
-      </button>
+    </div>
+    <div style="margin-top:16px;font-size:12px;color:var(--text2);text-align:center;">
+      Weitere Multiplayer-Spiele kommen bald!
     </div>
   </div>
 </div>

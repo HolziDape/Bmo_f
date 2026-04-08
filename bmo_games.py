@@ -2,6 +2,7 @@
 bmo_games.py — Mini-Spiele Blueprint (Pong Solo, Tetris, Snake, Breakout)
 Wird in bmo_web_freund.py registriert.
 """
+import math
 import time
 import secrets
 import threading
@@ -19,19 +20,57 @@ def _check_auth():
 _sessions: dict = {}
 _sessions_lock  = threading.Lock()
 
-# Minimale Spielzeit in Sekunden (Anti-Cheat)
-MIN_GAME_SECONDS = {
-    'pong':     60,
-    'tetris':   60,
-    'snake':    30,
-    'breakout': 20,
-}
-
-GAME_POINTS = {
+# Basis-Punkte pro Spiel (Normal-Schwierigkeit)
+BASE_POINTS = {
     'pong':     30,
     'tetris':   25,
     'snake':    20,
-    'breakout': 15,
+}
+
+# Multiplikatoren pro Schwierigkeit
+DIFF_MULTIPLIER = {
+    'easy':   0.25,
+    'normal': 0.5,
+    'hard':   1.0,
+    'insane': 3.0,
+}
+
+# Minimale Spielzeit (Anti-Cheat) pro (Spiel, Schwierigkeit)
+MIN_GAME_SECONDS = {
+    ('pong',     'easy'):   20,
+    ('pong',     'normal'): 30,
+    ('pong',     'hard'):   30,
+    ('pong',     'insane'): 30,
+    ('tetris',   'easy'):   30,
+    ('tetris',   'normal'): 60,
+    ('tetris',   'hard'):   60,
+    ('tetris',   'insane'): 60,
+    ('snake',    'easy'):   20,
+    ('snake',    'normal'): 30,
+    ('snake',    'hard'):   30,
+    ('snake',    'insane'): 30,
+}
+
+# Spiel-spezifische Parameter pro Schwierigkeit (werden als Template-Variablen übergeben)
+DIFF_PARAMS = {
+    'pong': {
+        'easy':   {'speed': 1.5, 'ai_factor': 0.03},
+        'normal': {'speed': 2.5, 'ai_factor': 0.05},
+        'hard':   {'speed': 4.0, 'ai_factor': 0.08},
+        'insane': {'speed': 7,   'ai_factor': 0.19},
+    },
+    'tetris': {
+        'easy':   {},
+        'normal': {},
+        'hard':   {},
+        'insane': {},
+    },
+    'snake': {
+        'easy':   {'tick': 200},
+        'normal': {'tick': 150},
+        'hard':   {'tick': 100},
+        'insane': {'tick': 65},
+    },
 }
 
 def _cleanup_sessions():
@@ -47,13 +86,18 @@ def _cleanup_sessions():
 def game_page(game):
     if not _check_auth():
         return redirect('/login')
-    if game not in MIN_GAME_SECONDS:
+    if game not in BASE_POINTS:
         return 'Spiel nicht gefunden', 404
+    diff = request.args.get('diff', 'normal')
+    if diff not in DIFF_MULTIPLIER:
+        diff = 'normal'
+    earned = math.floor(BASE_POINTS[game] * DIFF_MULTIPLIER[diff])
     token = secrets.token_hex(16)
     with _sessions_lock:
-        _sessions[token] = {'game': game, 'start': time.time()}
+        _sessions[token] = {'game': game, 'start': time.time(), 'diff': diff, 'earned': earned}
     _cleanup_sessions()
-    return render_template_string(_GAME_PAGES[game], token=token, points=GAME_POINTS[game])
+    params = DIFF_PARAMS[game][diff]
+    return render_template_string(_GAME_PAGES[game], token=token, points=earned, diff=diff, **params)
 
 
 @games_bp.route('/api/games/complete', methods=['POST'])
@@ -77,20 +121,23 @@ def api_games_complete():
         return jsonify(error='Falsches Spiel'), 403
 
     elapsed = time.time() - session['start']
-    min_sec = MIN_GAME_SECONDS.get(game, 30)
+    min_sec = MIN_GAME_SECONDS.get((game, session.get('diff', 'normal')), 30)
     if elapsed < min_sec:
         return jsonify(error=f'Zu schnell ({elapsed:.0f}s < {min_sec}s)'), 403
 
     current_points = int(data.get('points', 0))
     current_sig    = data.get('sig', '')
 
-    config_path = current_app.config.get('CONFIG_TXT', 'config.txt')
-    secret      = current_app.config.get('POINTS_SECRET', '')
+    secret = current_app.config.get('POINTS_SECRET', '')
+    if not secret:
+        return jsonify(error='Serverkonfiguration fehlt'), 500
 
-    if not _bp.verify(current_points, current_sig, secret):
+    if current_points == 0 and current_sig == '':
+        pass  # Frischer Start — keine Signatur vorhanden
+    elif not _bp.verify(current_points, current_sig, secret):
         return jsonify(error='Ungültige Signatur'), 403
 
-    earned     = GAME_POINTS[game]
+    earned     = session['earned']
     new_points = current_points + earned
     new_sig    = _bp.sign(new_points, secret)
 
@@ -107,16 +154,21 @@ _PONG_HTML = r"""<!DOCTYPE html>
   canvas{border:2px solid #22c55e;border-radius:4px;touch-action:none;}
   #msg{font-size:18px;margin-top:16px;min-height:24px;color:#4ade80;}
   #info{font-size:14px;color:#64748b;margin-top:8px;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:8px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
-<h2 style="color:#4ade80;margin-bottom:8px;">🏓 BMO Pong Solo</h2>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
+<h2 style="color:#4ade80;margin-bottom:4px;">🏓 BMO Pong Solo</h2>
 <div id="info">Gewinne 10 Runden &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="420" height="260"></canvas>
 <div id="msg">Bereit! Bewege die Maus oder tippe auf den Bildschirm.</div>
 <script>
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
-const W=canvas.width,H=canvas.height,PW=10,PH=60,BALL=8,SPEED=4;
+const W=canvas.width,H=canvas.height,PW=10,PH=60,BALL=8;
+const SPEED={{ speed }}, AI_FACTOR={{ ai_factor }};
 let py=(H-PH)/2,ay=(H-PH)/2,bx=W/2,by=H/2,vx=SPEED,vy=SPEED*(Math.random()>.5?1:-1);
 let wins=0,losses=0,running=true,gameOver=false;
 
@@ -132,8 +184,8 @@ canvas.addEventListener('touchmove',e=>{
 
 function resetBall(dir){
   bx=W/2;by=H/2;
-  vx=(SPEED+wins*0.15)*(dir||1);
-  vy=(SPEED+wins*0.1)*(Math.random()>.5?1:-1);
+  vx=(SPEED+wins*0.1)*(dir||1);
+  vy=(SPEED+wins*0.07)*(Math.random()>.5?1:-1);
 }
 
 function draw(){
@@ -145,17 +197,15 @@ function draw(){
   ctx.fillText(wins,W/4,40);ctx.fillText(losses,3*W/4,40);
   ctx.fillStyle='#64748b';ctx.font='12px sans-serif';
   ctx.fillText('Wins',W/4,58);ctx.fillText('Verloren',3*W/4,58);
-  ctx.fillStyle='#22c55e';ctx.beginPath();
-  ctx.roundRect(4,py,PW,PH,4);ctx.fill();
-  ctx.fillStyle='#ef4444';ctx.beginPath();
-  ctx.roundRect(W-PW-4,ay,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#22c55e';ctx.beginPath();ctx.roundRect(4,py,PW,PH,4);ctx.fill();
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.roundRect(W-PW-4,ay,PW,PH,4);ctx.fill();
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
 }
 
 function loop(){
   if(!running)return;
   const aim=by-(PH/2);
-  ay+=(aim-ay)*0.1;
+  ay+=(aim-ay)*AI_FACTOR;
   ay=Math.max(0,Math.min(H-PH,ay));
   bx+=vx;by+=vy;
   if(by-BALL<0){by=BALL;vy*=-1;}
@@ -182,6 +232,7 @@ async function finish(){
 
 resetBall();loop();
 </script>
+<button onclick="location.reload()" style="margin-top:16px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 
@@ -193,20 +244,25 @@ _TETRIS_HTML = r"""<!DOCTYPE html>
   body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
   canvas{border:2px solid #a855f7;border-radius:4px;}
   #msg{font-size:16px;margin-top:12px;min-height:20px;color:#c084fc;}
-  .ctrl{display:flex;gap:8px;margin-top:12px;}
+  .ctrl{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
   .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:18px;cursor:pointer;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:4px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
 <h2 style="color:#c084fc;margin-bottom:4px;">&#129689; BMO Tetris</h2>
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">Level 5 erreichen &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="200" height="400"></canvas>
-<div id="msg">&#8592; &#8594; bewegen | &#8593; drehen | &#8595; fallen</div>
+<div id="msg">&#8592; &#8594; bewegen | &#8593; drehen | &#8595; fallen | Leertaste: sofort</div>
 <div class="ctrl">
   <button ontouchstart="move(-1)">&#9664;</button>
   <button ontouchstart="rotate()">&#128260;</button>
   <button ontouchstart="move(1)">&#9654;</button>
   <button ontouchstart="drop()">&#9660;</button>
+  <button ontouchstart="hardDrop()" style="border-color:#a855f7;color:#c084fc;">&#9660;&#9660;</button>
 </div>
 <script>
 const COLS=10,ROWS=20,SZ=20;
@@ -236,6 +292,12 @@ function fits(s,x,y){
   return true;
 }
 
+function ghostY(){
+  let gy=cy;
+  while(fits(cur.s,cx,gy+1))gy++;
+  return gy;
+}
+
 function place(){
   cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{if(v)board[cy+ri][cx+ci]=cur.c;}));
   let cleared=0;
@@ -250,6 +312,11 @@ function place(){
 
 function move(d){if(!gameOver&&!done&&fits(cur.s,cx+d,cy))cx+=d;}
 function drop(){if(!gameOver&&!done&&fits(cur.s,cx,cy+1))cy++;else if(!gameOver&&!done)place();}
+function hardDrop(){
+  if(gameOver||done)return;
+  cy=ghostY();
+  place();
+}
 function rotate(){
   if(gameOver||done)return;
   const r=cur.s[0].map((_,i)=>cur.s.map(row=>row[i]).reverse());
@@ -261,6 +328,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight')move(1);
   if(e.key==='ArrowDown')drop();
   if(e.key==='ArrowUp')rotate();
+  if(e.key===' '){e.preventDefault();hardDrop();}
 });
 
 function draw(){
@@ -270,9 +338,21 @@ function draw(){
     ctx.fillStyle=v||'#0f172a';
     ctx.fillRect(c*SZ,r*SZ,SZ-1,SZ-1);
   }
-  if(cur)cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
-    if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(cy+ri)*SZ,SZ-1,SZ-1);}
-  }));
+  // Ghost piece
+  if(cur&&!done&&!gameOver){
+    const gy=ghostY();
+    if(gy!==cy){
+      ctx.globalAlpha=0.25;
+      cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
+        if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(gy+ri)*SZ,SZ-1,SZ-1);}
+      }));
+      ctx.globalAlpha=1;
+    }
+    // Actual piece
+    cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
+      if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(cy+ri)*SZ,SZ-1,SZ-1);}
+    }));
+  }
 }
 
 let last=0;
@@ -297,6 +377,7 @@ newPiece();
 document.getElementById('msg').textContent='Level '+level+' | Zeilen '+lines+' | Score '+score;
 requestAnimationFrame(loop);
 </script>
+<button onclick="location.reload()" style="margin-top:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 
@@ -310,9 +391,13 @@ _SNAKE_HTML = r"""<!DOCTYPE html>
   #msg{font-size:16px;margin-top:12px;min-height:20px;color:#4ade80;}
   .ctrl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px;width:150px;}
   .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:12px;border-radius:10px;font-size:18px;cursor:pointer;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:4px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
 <h2 style="color:#4ade80;margin-bottom:4px;">&#128013; BMO Snake</h2>
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">20 &#196;pfel essen &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="300" height="300"></canvas>
@@ -324,7 +409,7 @@ _SNAKE_HTML = r"""<!DOCTYPE html>
   <button ontouchstart="setDir(1,0)">&#9654;</button>
 </div>
 <script>
-const SZ=20,COLS=15,ROWS=15;
+const SZ=20,COLS=15,ROWS=15,TICK={{ tick }};
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 let snake=[{x:7,y:7}],dir={x:1,y:0},nextDir={x:1,y:0};
 let apple={x:3,y:3},eaten=0,dead=false,done=false;
@@ -382,92 +467,14 @@ async function finish(){
 }
 
 randApple();
-setInterval(()=>{step();draw();},150);
+setInterval(()=>{step();draw();},TICK);
 </script>
-</body>
-</html>"""
-
-_BREAKOUT_HTML = r"""<!DOCTYPE html>
-<html lang="de">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BMO Breakout</title>
-<style>
-  body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
-  canvas{border:2px solid #38bdf8;border-radius:4px;touch-action:none;}
-  #msg{font-size:16px;margin-top:12px;min-height:20px;color:#38bdf8;}
-</style>
-</head>
-<body>
-<h2 style="color:#38bdf8;margin-bottom:4px;">&#129522; BMO Breakout</h2>
-<div style="font-size:13px;color:#64748b;margin-bottom:8px;">Alle Steine zerst&#246;ren &rarr; +{{ points }} &#11088;</div>
-<canvas id="c" width="400" height="300"></canvas>
-<div id="msg">Maus/Touch bewegt Paddle</div>
-<script>
-const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
-const W=400,H=300,PW=70,PH=10,BALL=7,BROWS=4,BCOLS=8;
-const BCOLORS=['#ef4444','#f97316','#facc15','#22c55e'];
-let px=(W-PW)/2,bx=W/2,by=H-40,vx=3,vy=-4;
-let bricks=[],lives=3,done=false;
-
-for(let r=0;r<BROWS;r++)for(let c=0;c<BCOLS;c++)
-  bricks.push({x:c*48+8,y:r*22+30,w:44,h:18,alive:true,c:BCOLORS[r]});
-
-canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.clientX-r.left-PW/2));});
-canvas.addEventListener('touchmove',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();px=Math.min(W-PW,Math.max(0,e.touches[0].clientX-r.left-PW/2));},{passive:false});
-
-function draw(){
-  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,W,H);
-  bricks.forEach(b=>{if(!b.alive)return;ctx.fillStyle=b.c;ctx.beginPath();ctx.roundRect(b.x,b.y,b.w,b.h,3);ctx.fill();});
-  ctx.fillStyle='#38bdf8';ctx.beginPath();ctx.roundRect(px,H-PH-5,PW,PH,5);ctx.fill();
-  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,BALL,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle='#ef4444';ctx.font='14px sans-serif';ctx.textAlign='left';
-  ctx.fillText('\u2764\uFE0F'.repeat(lives),8,16);
-}
-
-function loop(){
-  if(done)return;
-  bx+=vx;by+=vy;
-  if(bx-BALL<0){bx=BALL;vx*=-1;}
-  if(bx+BALL>W){bx=W-BALL;vx*=-1;}
-  if(by-BALL<0){by=BALL;vy*=-1;}
-  if(by+BALL>H-PH-5&&bx>px&&bx<px+PW&&vy>0){
-    vy*=-1;vx+=(bx-(px+PW/2))*0.05;
-  }
-  if(by>H){
-    lives--;
-    if(lives<=0){document.getElementById('msg').textContent='Game Over! Seite neu laden.';return;}
-    bx=W/2;by=H-40;vx=3;vy=-4;
-  }
-  bricks.forEach(b=>{
-    if(!b.alive)return;
-    if(bx+BALL>b.x&&bx-BALL<b.x+b.w&&by+BALL>b.y&&by-BALL<b.y+b.h){
-      b.alive=false;vy*=-1;
-    }
-  });
-  const alive=bricks.filter(b=>b.alive).length;
-  if(alive===0&&!done){done=true;finish();return;}
-  draw();requestAnimationFrame(loop);
-}
-
-async function finish(){
-  document.getElementById('msg').textContent='Alle Steine! Punkte werden gutgeschrieben...';
-  const stored=JSON.parse(localStorage.getItem('bmo_points')||'{}');
-  const r=await fetch('/api/games/complete',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({token:'{{ token }}',game:'breakout',points:stored.points||0,sig:stored.sig||''})});
-  const d=await r.json();
-  if(d.error){document.getElementById('msg').textContent='Fehler: '+d.error;return;}
-  localStorage.setItem('bmo_points',JSON.stringify({points:d.points,sig:d.sig}));
-  document.getElementById('msg').textContent='+'+d.earned+' \u2B50 \u2192 jetzt '+d.points+' Punkte!';
-}
-
-draw();requestAnimationFrame(loop);
-</script>
+<button onclick="location.reload()" style="margin-top:12px;background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:10px;font-size:14px;cursor:pointer;">&#8635; Neu starten</button>
 </body>
 </html>"""
 
 _GAME_PAGES: dict = {
-    'pong':     _PONG_HTML,
-    'tetris':   _TETRIS_HTML,
-    'snake':    _SNAKE_HTML,
-    'breakout': _BREAKOUT_HTML,
+    'pong':   _PONG_HTML,
+    'tetris': _TETRIS_HTML,
+    'snake':  _SNAKE_HTML,
 }

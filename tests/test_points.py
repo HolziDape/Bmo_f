@@ -57,3 +57,19 @@ def test_save_and_load_points_admin():
 def test_load_points_admin_missing_returns_zero():
     with tempfile.TemporaryDirectory() as d:
         assert bmo_points.load_points_admin('nonexistent', d) == 0
+
+# ── Difficulty-System Tests ──────────────────────────────────────
+import math as _math
+from bmo_games import BASE_POINTS, DIFF_MULTIPLIER
+
+def test_diff_multiplier_easy():
+    result = _math.floor(BASE_POINTS['pong'] * DIFF_MULTIPLIER['easy'])
+    assert result == 7
+
+def test_diff_multiplier_insane():
+    result = _math.floor(BASE_POINTS['tetris'] * DIFF_MULTIPLIER['insane'])
+    assert result == 75
+
+def test_diff_multiplier_hard_snake():
+    result = _math.floor(BASE_POINTS['snake'] * DIFF_MULTIPLIER['hard'])
+    assert result == 20
