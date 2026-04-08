@@ -890,6 +890,8 @@ HTML = """<!DOCTYPE html>
   .diff-btn.hard{border-color:#f97316;color:#fb923c;}
   .diff-btn.insane{border-color:#ef4444;color:#f87171;}
   .game-label{font-size:15px;font-weight:600;margin-top:4px;}
+  @keyframes pulse-text{0%,100%{opacity:1}50%{opacity:.4}}
+  .bmo-thinking{animation:pulse-text 1.4s ease-in-out infinite;}
 </style>
 </head>
 <body>
@@ -899,6 +901,7 @@ HTML = """<!DOCTYPE html>
     <div>
       <h1>BMO</h1>
       <span class="sub" id="coreStatus">Verbinde...</span>
+      <span id="bmoReady" style="font-size:11px;margin-left:4px;"></span>
     </div>
     <div id="pointsBadge" style="margin-left:auto;background:rgba(34,197,94,0.12);border:1px solid #22c55e;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700;color:#4ade80;cursor:pointer;" onclick="showPointsShop()">
       &#11088; <span id="pointsVal">0</span>
@@ -1187,6 +1190,22 @@ function showMultiplayer() {
   document.getElementById('multiplayerOverlay').classList.add('show');
 }
 
+function updateLiteBtn(lite_mode) {
+  const btn = document.getElementById('liteReqBtn');
+  if (!btn) return;
+  if (lite_mode === false) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="icon">✓</span>Lite aus';
+    btn.style.borderColor = '#4ade80';
+    btn.style.color = '#4ade80';
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="icon">⚡</span>Lite aus?';
+    btn.style.borderColor = '#475569';
+    btn.style.color = '#94a3b8';
+  }
+}
+
 async function requestLiteOff() {
   const btn = document.getElementById('liteReqBtn');
   if (!ADMIN_URL) { alert('Admin nicht verbunden.'); return; }
@@ -1195,7 +1214,7 @@ async function requestLiteOff() {
   try {
     await fetch(`${ADMIN_URL}/api/lite-request`, {method: 'POST'});
     btn.textContent = '⚡ Anfrage ✓';
-    setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 10000);
+    // updateStatus (alle 5s) aktualisiert den Button-Zustand via updateLiteBtn
   } catch(e) {
     btn.textContent = '⚡ Fehler';
     setTimeout(() => { btn.disabled = false; btn.innerHTML = '<span class="icon">⚡</span>Lite aus?'; }, 3000);
@@ -1337,10 +1356,29 @@ async function updateStatus() {
     const ramBar = document.getElementById('sRamBar');
     ramBar.style.width = ram + '%';
     ramBar.className = 'bar-fill' + (ram > 90 ? ' crit' : ram > 70 ? ' warn' : '');
+    const readyEl = document.getElementById('bmoReady');
+    if (readyEl) {
+      if (d.busy) {
+        readyEl.textContent = '· Am Denken...';
+        readyEl.style.color = '#f59e0b';
+        readyEl.classList.add('bmo-thinking');
+      } else {
+        readyEl.textContent = '· Bereit';
+        readyEl.style.color = '#4ade80';
+        readyEl.classList.remove('bmo-thinking');
+      }
+    }
   } catch(e) {
     document.getElementById('coreDot').classList.add('off');
     document.getElementById('coreStatus').textContent = 'Core offline';
+    const readyEl = document.getElementById('bmoReady');
+    if (readyEl) { readyEl.textContent = ''; readyEl.classList.remove('bmo-thinking'); }
   }
+  try {
+    const lr = await fetch('/api/lite-mode');
+    const ld = await lr.json();
+    if (ld.lite_mode !== undefined && ld.lite_mode !== null) updateLiteBtn(ld.lite_mode);
+  } catch(e) { console.debug('[lite-mode poll]', e); }
 }
 updateStatus();
 setInterval(updateStatus, 5000);
@@ -2095,7 +2133,19 @@ def status():
         cpu = psutil.cpu_percent(interval=0.5)
         ram = psutil.virtual_memory().percent
         t   = datetime.datetime.now().strftime('%H:%M')
-        return jsonify(cpu=cpu, ram=ram, time=t, gpu=None)
+        return jsonify(cpu=cpu, ram=ram, time=t, gpu=None, busy=False)
+
+@app.route('/api/lite-mode')
+@login_required
+def api_lite_mode():
+    if not CORE_URL:
+        return jsonify(lite_mode=None)
+    try:
+        r = req.get(f"{CORE_URL}/lite-mode", timeout=3)
+        return jsonify(r.json())
+    except Exception:
+        return jsonify(lite_mode=None)
+
 
 @app.route('/api/settings', methods=['GET'])
 @login_required
