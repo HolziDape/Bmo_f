@@ -252,20 +252,25 @@ _TETRIS_HTML = r"""<!DOCTYPE html>
   body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;font-family:sans-serif;color:#e2e8f0;}
   canvas{border:2px solid #a855f7;border-radius:4px;}
   #msg{font-size:16px;margin-top:12px;min-height:20px;color:#c084fc;}
-  .ctrl{display:flex;gap:8px;margin-top:12px;}
+  .ctrl{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
   .ctrl button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:18px;cursor:pointer;}
+  .diff-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:4px;}
+  .easy{background:rgba(34,197,94,0.2);color:#4ade80;}.normal{background:rgba(59,130,246,0.2);color:#60a5fa;}
+  .hard{background:rgba(249,115,22,0.2);color:#fb923c;}.insane{background:rgba(239,68,68,0.2);color:#f87171;}
 </style>
 </head>
 <body>
+<div class="diff-badge {{ diff }}">{{ diff|upper }}</div>
 <h2 style="color:#c084fc;margin-bottom:4px;">&#129689; BMO Tetris</h2>
 <div style="font-size:13px;color:#64748b;margin-bottom:8px;">Level 5 erreichen &rarr; +{{ points }} &#11088;</div>
 <canvas id="c" width="200" height="400"></canvas>
-<div id="msg">&#8592; &#8594; bewegen | &#8593; drehen | &#8595; fallen</div>
+<div id="msg">&#8592; &#8594; bewegen | &#8593; drehen | &#8595; fallen | Leertaste: sofort</div>
 <div class="ctrl">
   <button ontouchstart="move(-1)">&#9664;</button>
   <button ontouchstart="rotate()">&#128260;</button>
   <button ontouchstart="move(1)">&#9654;</button>
   <button ontouchstart="drop()">&#9660;</button>
+  <button ontouchstart="hardDrop()" style="border-color:#a855f7;color:#c084fc;">&#9660;&#9660;</button>
 </div>
 <script>
 const COLS=10,ROWS=20,SZ=20;
@@ -295,6 +300,12 @@ function fits(s,x,y){
   return true;
 }
 
+function ghostY(){
+  let gy=cy;
+  while(fits(cur.s,cx,gy+1))gy++;
+  return gy;
+}
+
 function place(){
   cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{if(v)board[cy+ri][cx+ci]=cur.c;}));
   let cleared=0;
@@ -309,6 +320,11 @@ function place(){
 
 function move(d){if(!gameOver&&!done&&fits(cur.s,cx+d,cy))cx+=d;}
 function drop(){if(!gameOver&&!done&&fits(cur.s,cx,cy+1))cy++;else if(!gameOver&&!done)place();}
+function hardDrop(){
+  if(gameOver||done)return;
+  cy=ghostY();
+  place();
+}
 function rotate(){
   if(gameOver||done)return;
   const r=cur.s[0].map((_,i)=>cur.s.map(row=>row[i]).reverse());
@@ -320,6 +336,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight')move(1);
   if(e.key==='ArrowDown')drop();
   if(e.key==='ArrowUp')rotate();
+  if(e.key===' '){e.preventDefault();hardDrop();}
 });
 
 function draw(){
@@ -329,9 +346,21 @@ function draw(){
     ctx.fillStyle=v||'#0f172a';
     ctx.fillRect(c*SZ,r*SZ,SZ-1,SZ-1);
   }
-  if(cur)cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
-    if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(cy+ri)*SZ,SZ-1,SZ-1);}
-  }));
+  // Ghost piece
+  if(cur&&!done&&!gameOver){
+    const gy=ghostY();
+    if(gy!==cy){
+      ctx.globalAlpha=0.25;
+      cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
+        if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(gy+ri)*SZ,SZ-1,SZ-1);}
+      }));
+      ctx.globalAlpha=1;
+    }
+    // Actual piece
+    cur.s.forEach((r,ri)=>r.forEach((v,ci)=>{
+      if(v){ctx.fillStyle=cur.c;ctx.fillRect((cx+ci)*SZ,(cy+ri)*SZ,SZ-1,SZ-1);}
+    }));
+  }
 }
 
 let last=0;
