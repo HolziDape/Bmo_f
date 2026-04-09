@@ -72,7 +72,7 @@ CORS(app)
 from bmo_games import games_bp
 app.register_blueprint(games_bp)
 
-PORT = 5000
+PORT = 5001
 
 # ── KONFIGURATION (bmo_config.txt — Login/IP) ─────────────────────────────
 _CONFIG_PATH = os.path.join(BASE_DIR, "bmo_config.txt")
@@ -616,6 +616,111 @@ def _screen_generator():
 # SETUP + LOGIN HTML
 # ══════════════════════════════════════════════════════════════════
 
+BMO_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 215">
+  <defs>
+    <!-- Körper Verlauf: leichter Glanz oben -->
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#c2e8e0"/>
+      <stop offset="100%" stop-color="#96c8be"/>
+    </linearGradient>
+    <!-- Bildschirm Verlauf -->
+    <linearGradient id="screenGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#d0ede7"/>
+      <stop offset="100%" stop-color="#aed8d0"/>
+    </linearGradient>
+    <!-- Mund Verlauf -->
+    <linearGradient id="mouthGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1f6b5a"/>
+      <stop offset="100%" stop-color="#2d9478"/>
+    </linearGradient>
+    <!-- Pink Button Verlauf -->
+    <radialGradient id="pinkGrad" cx="38%" cy="35%">
+      <stop offset="0%"   stop-color="#f060aa"/>
+      <stop offset="100%" stop-color="#c0206a"/>
+    </radialGradient>
+    <!-- Grün Button Verlauf -->
+    <radialGradient id="greenGrad" cx="38%" cy="35%">
+      <stop offset="0%"   stop-color="#6ad648"/>
+      <stop offset="100%" stop-color="#38962a"/>
+    </radialGradient>
+    <!-- Blau Button Verlauf -->
+    <radialGradient id="blueGrad" cx="38%" cy="35%">
+      <stop offset="0%"   stop-color="#4050c8"/>
+      <stop offset="100%" stop-color="#1a2080"/>
+    </radialGradient>
+    <!-- D-Pad Verlauf -->
+    <linearGradient id="dpadGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#ffd020"/>
+      <stop offset="100%" stop-color="#d49a00"/>
+    </linearGradient>
+    <!-- Cyan Dreieck -->
+    <linearGradient id="triGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#80e8f8"/>
+      <stop offset="100%" stop-color="#28b8d8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Hintergrund -->
+  <rect width="180" height="215" fill="#6ecfbf"/>
+
+  <!-- Körper äußerer Schatten/Rand -->
+  <rect x="11" y="7" width="158" height="202" rx="24" fill="#3ea090"/>
+  <!-- Körper Hauptfläche -->
+  <rect x="14" y="10" width="152" height="199" rx="22" fill="url(#bodyGrad)"/>
+
+  <!-- Bildschirm Rand -->
+  <rect x="19" y="15" width="142" height="112" rx="19" fill="#7ab8ae"/>
+  <!-- Bildschirm Fläche -->
+  <rect x="22" y="18" width="136" height="108" rx="17" fill="url(#screenGrad)"/>
+  <!-- Bildschirm Glanzstreifen oben -->
+  <rect x="28" y="21" width="124" height="18" rx="10" fill="rgba(255,255,255,0.22)"/>
+
+  <!-- Linkes Auge -->
+  <ellipse cx="68" cy="60" rx="8" ry="10" fill="#1a1a1a"/>
+  <ellipse cx="65" cy="57" rx="2.5" ry="3" fill="rgba(255,255,255,0.35)"/>
+  <!-- Rechtes Auge -->
+  <ellipse cx="112" cy="60" rx="8" ry="10" fill="#1a1a1a"/>
+  <ellipse cx="109" cy="57" rx="2.5" ry="3" fill="rgba(255,255,255,0.35)"/>
+
+  <!-- Mund – offenes Lächeln -->
+  <path d="M53 90 Q90 124 127 90 Q90 100 53 90Z" fill="url(#mouthGrad)"/>
+  <!-- Zähne -->
+  <path d="M56 92 Q90 104 124 92" stroke="#e8f8f2" stroke-width="4"
+        fill="none" stroke-linecap="round"/>
+
+  <!-- Speaker-Leiste -->
+  <rect x="19" y="133" width="92" height="11" rx="5.5" fill="#2a8070"/>
+  <!-- Highlight auf Leiste -->
+  <rect x="23" y="134" width="84" height="4" rx="2" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Kreis rechts der Leiste -->
+  <circle cx="137" cy="138" r="10" fill="url(#blueGrad)"/>
+  <circle cx="134" cy="135" r="3" fill="rgba(255,255,255,0.3)"/>
+
+  <!-- D-Pad: horizontal -->
+  <rect x="31" y="154" width="36" height="14" rx="4" fill="url(#dpadGrad)"/>
+  <!-- D-Pad: vertikal -->
+  <rect x="42" y="143" width="14" height="36" rx="4" fill="url(#dpadGrad)"/>
+  <!-- D-Pad Highlight -->
+  <circle cx="49" cy="161" r="4" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Zwei Dash-Buttons -->
+  <rect x="31" y="187" width="14" height="8" rx="3" fill="url(#blueGrad)"/>
+  <rect x="51" y="187" width="14" height="8" rx="3" fill="url(#blueGrad)"/>
+
+  <!-- Dreieck-Button -->
+  <polygon points="113,145 128,168 98,168" fill="url(#triGrad)"/>
+  <polygon points="113,150 124,165 102,165" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Pink-Button -->
+  <circle cx="138" cy="181" r="16" fill="url(#pinkGrad)"/>
+  <circle cx="133" cy="176" r="5" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- Grüner Button -->
+  <circle cx="160" cy="152" r="12" fill="url(#greenGrad)"/>
+  <circle cx="156" cy="148" r="4" fill="rgba(255,255,255,0.25)"/>
+</svg>'''
+
 SETUP_HTML = """<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -795,6 +900,13 @@ HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>BMO</title>
+<meta name="theme-color" content="#5eead4">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BMO">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="manifest" href="/manifest.json">
+<script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
@@ -1358,13 +1470,20 @@ async function updateStatus() {
     ramBar.className = 'bar-fill' + (ram > 90 ? ' crit' : ram > 70 ? ' warn' : '');
     const readyEl = document.getElementById('bmoReady');
     if (readyEl) {
-      if (d.busy) {
+      if (d.lite_mode) {
+        readyEl.textContent = '· Lite-Modus';
+        readyEl.style.color = '#94a3b8';
+        readyEl.style.textShadow = '0 1px 3px #000';
+        readyEl.classList.remove('bmo-thinking');
+      } else if (d.busy) {
         readyEl.textContent = '· Am Denken...';
         readyEl.style.color = '#f59e0b';
+        readyEl.style.textShadow = '';
         readyEl.classList.add('bmo-thinking');
       } else {
         readyEl.textContent = '· Bereit';
         readyEl.style.color = '#4ade80';
+        readyEl.style.textShadow = '';
         readyEl.classList.remove('bmo-thinking');
       }
     }
@@ -2146,6 +2265,31 @@ def api_lite_mode():
     except Exception:
         return jsonify(lite_mode=None)
 
+
+@app.route('/icon.svg')
+def icon_svg():
+    return Response(BMO_SVG, mimetype='image/svg+xml')
+
+@app.route('/manifest.json')
+def manifest():
+    return jsonify(
+        name="BMO",
+        short_name="BMO",
+        start_url="/",
+        display="standalone",
+        background_color="#0f172a",
+        theme_color="#5eead4",
+        icons=[{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+    )
+
+@app.route('/sw.js')
+def sw_js():
+    js = (
+        "self.addEventListener('install', () => self.skipWaiting());\n"
+        "self.addEventListener('activate', e => e.waitUntil(clients.claim()));\n"
+        "self.addEventListener('fetch', e => e.respondWith(fetch(e.request)));\n"
+    )
+    return Response(js, mimetype='application/javascript')
 
 @app.route('/api/settings', methods=['GET'])
 @login_required
